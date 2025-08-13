@@ -36,56 +36,29 @@ const TimeLogger = () => {
   // Check if total hours exceed limit
   const totalHours = sumHours();
 
-  // Add hours with limit checking
-  const addHours = useCallback((projectId, hours) => {
-    setHoursPerProject(prev => {
-      const currentHours = Math.max(0, prev[projectId] || 0); // Ensure no negative values
-      const newHours = Math.max(0, Math.round(currentHours + hours)); // Round to whole numbers
-      
-      // Check if adding these hours would exceed the total limit
-      const currentTotal = Object.values(prev).reduce((sum, h) => sum + Math.max(0, h), 0) - currentHours;
-      const wouldExceedLimit = currentTotal + newHours > maxHours;
-      
-      if (wouldExceedLimit) {
-        // Calculate how many hours can be added without exceeding limit
-        const maxAllowedHours = maxHours - currentTotal;
-        const actualHoursToAdd = Math.max(0, Math.round(maxAllowedHours)); // Round to whole numbers
-        
-        console.log(`Cannot add ${hours} hours. Maximum allowed: ${actualHoursToAdd}`);
-        return {
-          ...prev,
-          [projectId]: Math.max(0, currentHours + actualHoursToAdd)
-        };
-      }
-      
-      return {
-        ...prev,
-        [projectId]: newHours
-      };
-    });
-  }, [maxHours]);
-
-  // Generate random color for projects
-  const getRandomColor = () => {
+  // Fixed set of highly contrasting colors for projects
+  const getProjectColor = (projectId) => {
     const colors = [
-      '#FF6B6B', // Яркий красный
-      '#4ECDC4', // Яркий бирюзовый
-      '#45B7D1', // Яркий синий
-      '#96CEB4', // Яркий зеленый
-      '#FFEAA7', // Яркий желтый
-      '#DDA0DD', // Яркий фиолетовый
-      '#98D8C8', // Яркий мятный
-      '#F7DC6F', // Яркий золотой
-      '#BB8FCE', // Яркий лавандовый
-      '#85C1E9', // Яркий голубой
-      '#FF9F43', // Яркий оранжевый
-      '#00D2D3', // Яркий циан
-      '#FF6B9D', // Яркий розовый
-      '#4ECDC4', // Яркий изумрудный
-      '#A8E6CF', // Яркий салатовый
-      '#FFB3BA'  // Яркий коралловый
+      '#FF0000', // Яркий красный
+      '#00FF00', // Яркий зеленый
+      '#0000FF', // Яркий синий
+      '#FFFF00', // Яркий желтый
+      '#FF00FF', // Яркий пурпурный
+      '#00FFFF', // Яркий циан
+      '#FF8000', // Яркий оранжевый
+      '#8000FF', // Яркий фиолетовый
+      '#FF0080', // Яркий розовый
+      '#80FF00', // Яркий лаймовый
+      '#0080FF', // Яркий голубой
+      '#FF4000', // Яркий красно-оранжевый
+      '#4000FF', // Яркий сине-фиолетовый
+      '#FF8040', // Яркий персиковый
+      '#8040FF', // Яркий лавандовый
+      '#FF4080'  // Яркий малиновый
     ];
-    return colors[Math.floor(Math.random() * colors.length)];
+    
+    // Use project ID to consistently assign the same color to the same project
+    return colors[projectId % colors.length];
   };
 
   // Fetch timesheet data
@@ -160,7 +133,7 @@ const TimeLogger = () => {
                 company: item.project.customer_short_name || 'Неизвестная компания',
                 status: item.project.project_status,
                 direction: item.project.direction || 'Не указано',
-                color: getRandomColor(),
+                color: getProjectColor(item.project.id),
                 // Additional project info
                 startDate: item.project.start_at,
                 deadlineDate: item.project.deadline_at,
@@ -328,15 +301,55 @@ const TimeLogger = () => {
     const angle = Math.atan2(y, x);
     const deltaAngle = angle - startDragAngle;
     
-    if (Math.abs(deltaAngle) > 0.1) {
-      const hoursToAdd = Math.floor(deltaAngle / (Math.PI / 4)) * 0.5;
+    if (Math.abs(deltaAngle) > 0.05) {
+      // Convert angle to hours: positive delta = increase, negative = decrease
+      const hoursToAdd = Math.round(deltaAngle / (Math.PI / 4)) * 0.5;
       
       if (hoursToAdd !== 0) {
-        addHours(activeId, hoursToAdd);
+        const currentProjectHours = hoursPerProject[activeId] || 0;
+        const newProjectHours = currentProjectHours + hoursToAdd;
+        
+        // Don't allow negative hours for individual projects
+        if (newProjectHours < 0) {
+          return;
+        }
+        
+        // If decreasing hours, just do it immediately
+        if (hoursToAdd < 0) {
+          setHoursPerProject(prev => ({
+            ...prev,
+            [activeId]: Math.max(0, newProjectHours)
+          }));
+          setStartDragAngle(angle);
+          return;
+        }
+        
+        // If increasing hours, check total limit
+        const currentTotal = Object.values(hoursPerProject).reduce((sum, h) => sum + (h || 0), 0);
+        const wouldExceedLimit = currentTotal - currentProjectHours + newProjectHours > maxHours;
+        
+        if (wouldExceedLimit) {
+          // Calculate max allowed hours
+          const maxAllowedHours = maxHours - (currentTotal - currentProjectHours);
+          const actualHoursToAdd = Math.max(0, Math.min(hoursToAdd, maxAllowedHours - currentProjectHours));
+          
+          if (actualHoursToAdd > 0) {
+            setHoursPerProject(prev => ({
+              ...prev,
+              [activeId]: Math.max(0, currentProjectHours + actualHoursToAdd)
+            }));
+          }
+        } else {
+          setHoursPerProject(prev => ({
+            ...prev,
+            [activeId]: Math.max(0, newProjectHours)
+          }));
+        }
+        
         setStartDragAngle(angle);
       }
     }
-  }, [dragging, activeId, startDragAngle, addHours]);
+  }, [dragging, activeId, startDragAngle, hoursPerProject, maxHours]);
 
   const handleEnd = useCallback(() => {
     setDragging(false);
@@ -478,7 +491,6 @@ const TimeLogger = () => {
             }
           }}
           dateFormat="dd.MM.yyyy"
-          locale="ru"
           maxDate={new Date()}
           className="date-picker-input"
           placeholderText="Выберите дату"
@@ -507,7 +519,7 @@ const TimeLogger = () => {
           <div className="summary-total">
             <span className="total-label">Всего часов:</span>
             <span className={`total-hours ${totalHours >= maxHours ? 'limit-reached' : ''}`}>
-              {totalHours}/{maxHours}
+              {Math.round(totalHours)}/{maxHours}
             </span>
           </div>
           <div className="summary-list">
@@ -520,7 +532,7 @@ const TimeLogger = () => {
                 <div className="dot" style={{ backgroundColor: p.color }}></div>
                 <div className="name">{p.name}</div>
                 <div className="hrs">
-                  <span className="hours">{hoursPerProject[p.id] || 0}</span>
+                  <span className="hours">{Math.round(hoursPerProject[p.id] || 0)}</span>
                   <span className="unit">ч</span>
                 </div>
               </div>
@@ -544,7 +556,7 @@ const TimeLogger = () => {
               )}
             </div>
           </div>
-          <div className="hours">{(hoursPerProject[activeId] || 0)} ч</div>
+          <div className="hours">{Math.round(hoursPerProject[activeId] || 0)} ч</div>
         </>
       )}
 
