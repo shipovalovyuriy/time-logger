@@ -278,6 +278,10 @@ const TimeLogger = () => {
     const rect = canvas.getBoundingClientRect();
     const x = (e.clientX || e.touches[0].clientX) - rect.left - rect.width / 2;
     const y = (e.clientY || e.touches[0].clientY) - rect.top - rect.height / 2;
+    
+    // Ensure we have valid coordinates
+    if (Math.abs(x) < 0.1 && Math.abs(y) < 0.1) return 0;
+    
     return Math.atan2(y, x);
   }, []);
 
@@ -299,7 +303,21 @@ const TimeLogger = () => {
     const y = (e.clientY || e.touches[0].clientY) - rect.top - rect.height / 2;
     
     const angle = Math.atan2(y, x);
-    const deltaAngle = angle - startDragAngle;
+    
+    // Normalize angles to prevent jumps across 180° boundary
+    let normalizedStartAngle = startDragAngle;
+    let normalizedCurrentAngle = angle;
+    
+    // Handle angle wrapping around the circle
+    if (Math.abs(angle - startDragAngle) > Math.PI) {
+      if (angle > startDragAngle) {
+        normalizedCurrentAngle = angle - 2 * Math.PI;
+      } else {
+        normalizedCurrentAngle = angle + 2 * Math.PI;
+      }
+    }
+    
+    const deltaAngle = normalizedCurrentAngle - normalizedStartAngle;
     
     if (Math.abs(deltaAngle) > 0.05) {
       // Convert angle to hours: positive delta = increase, negative = decrease
