@@ -1,14 +1,20 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import DatePicker from 'react-datepicker';
+import 'react-datepicker/dist/react-datepicker.css';
 import './TimeLogger.css';
 
 const TimeLogger = () => {
   const [hoursPerProject, setHoursPerProject] = useState({});
-  const [activeId, setActiveId] = useState(1);
+  const [activeId, setActiveId] = useState(null);
   const [dragging, setDragging] = useState(false);
   const [hoursAccumulator, setHoursAccumulator] = useState(0);
   const [startDragAngle, setStartDragAngle] = useState(0);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [isAnimating, setIsAnimating] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [projects, setProjects] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState('');
 
   const canvasRef = useRef(null);
   const ctxRef = useRef(null);
@@ -20,20 +26,136 @@ const TimeLogger = () => {
   const SEGMENT_STROKE = 30;
   const maxHours = 8;
 
-  const projects = useMemo(() => [
-    { id: 1, name: 'Проект А', color: 'dodgerblue' },
-    { id: 2, name: 'Проект B', color: 'tomato' },
-    { id: 3, name: 'Проект C', color: 'mediumseagreen' },
-    { id: 4, name: 'Проект D', color: 'gold' },
-    { id: 5, name: 'Проект E', color: 'purple' },
-    { id: 6, name: 'Проект F', color: 'orange' },
-    { id: 7, name: 'Проект G', color: 'teal' }
-  ], []);
+  // Generate colors for projects
+  const generateProjectColors = (count) => {
+    const colors = [
+      '#667eea', '#764ba2', '#f093fb', '#f5576c', '#4facfe',
+      '#00f2fe', '#43e97b', '#38f9d7', '#fa709a', '#fee140',
+      '#a8edea', '#fed6e3', '#ffecd2', '#fcb69f', '#ff9a9e',
+      '#fecfef', '#fecfef', '#ffecd2', '#fcb69f', '#ff9a9e'
+    ];
+    
+    return colors.slice(0, count);
+  };
 
-  // Initialize hours per project
+  // Fetch timesheet data
+  const fetchTimesheet = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      setError('');
+      
+      // Get user ID and token from localStorage
+      const userId = localStorage.getItem('userId') || '3227'; // Default fallback
+      const authToken = localStorage.getItem('token');
+      
+      if (!authToken) {
+        throw new Error('Токен авторизации не найден. Пожалуйста, войдите в систему.');
+      }
+      
+      // Calculate month start and end based on selected date
+      const selectedYear = selectedDate.getFullYear();
+      const selectedMonth = selectedDate.getMonth() + 1; // getMonth() returns 0-11
+      const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
+      
+      const monthStart = `1.${selectedMonth}.${selectedYear}`;
+      const monthEnd = `${daysInMonth}.${selectedMonth}.${selectedYear}`;
+      
+      const response = await fetch(
+        `https://test.newpulse.pkz.icdc.io/project-service/api/v1/timesheet/list?member_id=${userId}&month_start=${monthStart}&month_end=${monthEnd}`,
+        {
+          method: 'GET',
+          headers: {
+            'Authorization': authToken,
+            'Content-Type': 'application/json',
+          }
+        }
+      );
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('Токен истек. Пожалуйста, войдите в систему снова.');
+        } else if (response.status === 403) {
+          throw new Error('Доступ запрещен. Проверьте права доступа.');
+        } else {
+          throw new Error(`Ошибка загрузки табеля: ${response.status}`);
+        }
+      }
+
+      const data = await response.json();
+      
+      if (!data.status || !data.result) {
+        throw new Error('Неверный формат ответа от сервера');
+      }
+      
+      // Extract unique projects from timesheet data
+      const projectMap = new Map();
+      
+      data.result.forEach(item => {
+        if (item.project && item.is_active) {
+          const projectId = item.project.id;
+          
+          if (!projectMap.has(projectId)) {
+            projectMap.set(projectId, {
+              id: projectId,
+              name: item.project.project_name,
+              company: item.project.customer_short_name,
+              status: item.project.project_status,
+              isActive: item.is_active,
+              direction: item.project.direction,
+              projectLevel: item.project.project_level,
+              projectType: item.project.project_type,
+              healthStatus: item.project.project_health_status,
+              startDate: item.project.start_at,
+              deadlineDate: item.project.deadline_at,
+              factDeadlineDate: item.project.fact_deadline_at,
+              contractNum: item.project.contract_num,
+              sysProjectId: item.project.sys_project_id,
+              timesheetData: item
+            });
+          }
+        }
+      });
+      
+      const transformedProjects = Array.from(projectMap.values());
+      setProjects(transformedProjects);
+      
+      // Set active project to first one
+      if (transformedProjects.length > 0) {
+        setActiveId(transformedProjects[0].id);
+      }
+
+      // Initialize hours per project
+      const initialHours = Object.fromEntries(
+        transformedProjects.map(p => [p.id, 0])
+      );
+      setHoursPerProject(initialHours);
+
+    } catch (err) {
+      setError(err.message);
+      console.error('Error fetching timesheet:', err);
+      
+      // If token is invalid, redirect to login
+      if (err.message.includes('токен') || err.message.includes('авторизации')) {
+        localStorage.removeItem('token');
+        // You can add redirect logic here if needed
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  }, [selectedDate]);
+
+  // Load projects on component mount
   useEffect(() => {
-    const initialHours = Object.fromEntries(projects.map(p => [p.id, 0]));
-    setHoursPerProject(initialHours);
+    fetchTimesheet();
+  }, [fetchTimesheet]);
+
+  // Generate colors for projects
+  const projectColors = useMemo(() => {
+    const colors = generateProjectColors(projects.length);
+    return projects.map((project, index) => ({
+      ...project,
+      color: colors[index]
+    }));
   }, [projects]);
 
   const sumHours = useCallback(() => {
@@ -65,7 +187,7 @@ const TimeLogger = () => {
     ctx.stroke();
 
     // Draw project segments
-    const ordered = [...projects].sort((a, b) => a.id - b.id);
+    const ordered = [...projectColors].sort((a, b) => a.id - b.id);
     let start = -Math.PI / 2;
     
     ordered.forEach(p => {
@@ -81,7 +203,7 @@ const TimeLogger = () => {
       ctx.stroke();
       start += ang;
     });
-  }, [hoursPerProject, projects, maxHours]);
+  }, [hoursPerProject, projectColors, maxHours]);
 
   // Initialize canvas
   useEffect(() => {
@@ -106,6 +228,13 @@ const TimeLogger = () => {
 
     return () => window.removeEventListener('resize', resizeCanvas);
   }, [drawCircle]);
+
+  // Update canvas when projects change
+  useEffect(() => {
+    if (projectColors.length > 0) {
+      drawCircle();
+    }
+  }, [projectColors, drawCircle]);
 
   const getAngleFromEvent = useCallback((e) => {
     const canvas = canvasRef.current;
@@ -179,7 +308,8 @@ const TimeLogger = () => {
       activeId, 
       hoursPerProject, 
       total: sumHours(), 
-      capacity: maxHours 
+      capacity: maxHours,
+      date: selectedDate.toISOString().split('T')[0] // Format as YYYY-MM-DD
     };
     
     // Check if Telegram WebApp is available
@@ -187,6 +317,19 @@ const TimeLogger = () => {
       window.Telegram.WebApp.sendData(JSON.stringify(payload));
     } else {
       console.log('Submit payload:', payload);
+      
+      // You can also send to your API here if needed
+      // const authToken = localStorage.getItem('token');
+      // if (authToken) {
+      //   fetch('your-api-endpoint', {
+      //     method: 'POST',
+      //     headers: {
+      //       'Authorization': authToken,
+      //       'Content-Type': 'application/json',
+      //     },
+      //     body: JSON.stringify(payload)
+      //   });
+      // }
     }
     
     // Reset animation after 2 seconds
@@ -194,7 +337,7 @@ const TimeLogger = () => {
       setIsAnimating(false);
       setIsSubmitted(false);
     }, 2000);
-  }, [activeId, hoursPerProject, sumHours, maxHours]);
+  }, [activeId, hoursPerProject, sumHours, maxHours, selectedDate]);
 
   // Add event listeners
   useEffect(() => {
@@ -228,44 +371,89 @@ const TimeLogger = () => {
   return (
     <>
       <header>Выставление часов</header>
-      <div className="summary-title">Итоги по проектам</div>
-      <div className="summary-total">
-        Всего: {sumHours()} / {maxHours} ч
+      
+      <div className="date-picker-container">
+        <label htmlFor="date-picker">Дата:</label>
+        <DatePicker
+          id="date-picker"
+          selected={selectedDate}
+          onChange={(date) => setSelectedDate(date)}
+          dateFormat="dd.MM.yyyy"
+          locale="ru"
+          maxDate={new Date()}
+          className="date-picker-input"
+          placeholderText="Выберите дату"
+        />
       </div>
-      <div className="summary-list">
-        {projects.map(p => (
-          <div
-            key={p.id}
-            className={`row ${p.id === activeId ? 'active' : ''}`}
-            onClick={() => handleProjectClick(p.id)}
-          >
-            <div className="left">
-              <span className="dot" style={{ background: p.color }}></span>
-              <span className="name">{p.name}</span>
-            </div>
-            <div className="hrs">{(hoursPerProject[p.id] || 0)} ч</div>
-          </div>
-        ))}
-      </div>
-      <div className="circle-container">
-        <canvas ref={canvasRef} />
-        <div 
-          className={`center-button ${isAnimating ? 'bounce' : ''} ${isSubmitted ? 'submitted' : ''}`}
-          onClick={handleSubmit}
-          title={isSubmitted ? "Часы залогированы!" : "Внести часы"}
-        >
-          {isSubmitted ? (
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M20 6L9 17l-5-5" />
-            </svg>
-          ) : (
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-          )}
+
+      {isLoading && (
+        <div className="loading-container">
+          <div className="spinner"></div>
+          <p>Загрузка проектов...</p>
         </div>
-      </div>
-      <div className="hours">{(hoursPerProject[activeId] || 0)} ч</div>
+      )}
+
+      {error && (
+        <div className="error-container">
+          <p>{error}</p>
+          <button onClick={fetchTimesheet} className="retry-button">
+            Попробовать снова
+          </button>
+        </div>
+      )}
+
+      {!isLoading && !error && projects.length > 0 && (
+        <>
+          <div className="summary-title">Итоги по проектам</div>
+          <div className="summary-total">
+            Всего: {sumHours()} / {maxHours} ч
+          </div>
+          <div className="summary-list">
+            {projectColors.map(p => (
+              <div
+                key={p.id}
+                className={`row ${p.id === activeId ? 'active' : ''}`}
+                onClick={() => handleProjectClick(p.id)}
+              >
+                <div className="left">
+                  <span className="dot" style={{ background: p.color }}></span>
+                  <div className="project-info">
+                    <span className="name">{p.name}</span>
+                    <span className="company">{p.company}</span>
+                    <span className="status">{p.status} • {p.direction}</span>
+                  </div>
+                </div>
+                <div className="hrs">{(hoursPerProject[p.id] || 0)} ч</div>
+              </div>
+            ))}
+          </div>
+          <div className="circle-container">
+            <canvas ref={canvasRef} />
+            <div 
+              className={`center-button ${isAnimating ? 'bounce' : ''} ${isSubmitted ? 'submitted' : ''}`}
+              onClick={handleSubmit}
+              title={isSubmitted ? "Часы залогированы!" : "Внести часы"}
+            >
+              {isSubmitted ? (
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M20 6L9 17l-5-5" />
+                </svg>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              )}
+            </div>
+          </div>
+          <div className="hours">{(hoursPerProject[activeId] || 0)} ч</div>
+        </>
+      )}
+
+      {!isLoading && !error && projects.length === 0 && (
+        <div className="no-projects">
+          <p>Нет доступных проектов</p>
+        </div>
+      )}
     </>
   );
 };

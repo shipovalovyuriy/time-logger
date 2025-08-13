@@ -63,6 +63,7 @@ header {
   backdrop-filter: blur(15px);
   transition: all 0.3s ease;
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+  min-height: 70px;
 }
 
 .row:hover {
@@ -211,4 +212,300 @@ canvas {
     transform: scale(1);
     opacity: 1;
   }
+}
+
+/* DatePicker styles */
+.date-picker-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 20px;
+  width: 100%;
+  max-width: 420px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.date-picker-container label {
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.date-picker-input {
+  padding: 12px 16px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.15);
+  color: white;
+  font-size: 16px;
+  text-align: center;
+  transition: all 0.3s ease;
+  backdrop-filter: blur(15px);
+  cursor: pointer;
+  min-width: 150px;
+}
+
+.date-picker-input:focus {
+  outline: none;
+  border-color: #00d4ff;
+  background: rgba(255, 255, 255, 0.2);
+  box-shadow: 0 0 20px rgba(0, 212, 255, 0.3);
+  transform: translateY(-2px);
+}
+
+.date-picker-input:hover {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+/* Custom DatePicker popup styles */
+.react-datepicker {
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 16px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+  font-family: 'Segoe UI', sans-serif;
+}
+
+.react-datepicker__header {
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 16px 16px 0 0;
+}
+
+.react-datepicker__current-month,
+.react-datepicker__day-name {
+  color: white;
+  font-weight: 600;
+}
+
+.react-datepicker__day-name {
+  color: white !important;
+  font-weight: 700;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.react-datepicker__current-month {
+  color: white !important;
+  font-size: 16px;
+  font-weight: 700;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.react-datepicker__year-dropdown,
+.react-datepicker__month-dropdown {
+  color: white;
+  background: transparent;
+  border: none;
+}
+
+.react-datepicker__year-dropdown:hover,
+.react-datepicker__month-dropdown:hover {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+}
+
+.react-datepicker__year-option,
+.react-datepicker__month-option {
+  color: #333;
+  background: white;
+  padding: 8px 12px;
+  border-radius: 6px;
+  margin: 2px;
+  transition: all 0.2s ease;
+}
+
+.react-datepicker__year-option:hover,
+.react-datepicker__month-option:hover {
+  background: linear-gradient(135deg, #00d4ff, #0099cc);
+  color: white;
+  transform: scale(1.05);
+}
+
+.react-datepicker__year-option--selected,
+.react-datepicker__month-option--selected {
+  background: linear-gradient(135deg, #00d4ff, #0099cc);
+  color: white;
+  font-weight: 600;
+}
+
+.react-datepicker__day {
+  color: #333;
+  border-radius: 8px;
+  margin: 2px;
+  transition: all 0.2s ease;
+}
+
+.react-datepicker__day:hover {
+  background: linear-gradient(135deg, #00d4ff, #0099cc);
+  color: white;
+  transform: scale(1.1);
+}
+
+.react-datepicker__day--selected {
+  background: linear-gradient(135deg, #00d4ff, #0099cc);
+  color: white;
+  font-weight: 600;
+}
+
+.react-datepicker__day--keyboard-selected {
+  background: linear-gradient(135deg, #00d4ff, #0099cc);
+  color: white;
+}
+
+.react-datepicker__day--disabled {
+  color: #ccc;
+  opacity: 0.5;
+}
+
+.react-datepicker__navigation {
+  top: 15px;
+}
+
+.react-datepicker__navigation-icon::before {
+  border-color: white;
+  border-width: 2px 2px 0 0;
+}
+
+.react-datepicker__month-container {
+  background: transparent;
+}
+
+.react-datepicker__month {
+  margin: 0;
+  padding: 10px;
+}
+
+.react-datepicker__week {
+  display: flex;
+  justify-content: space-around;
+}
+
+.react-datepicker__day-names {
+  display: flex;
+  justify-content: space-around;
+  margin-bottom: 5px;
+}
+
+.react-datepicker__day-name {
+  width: 30px;
+  text-align: center;
+  margin: 2px;
+  font-weight: 600;
+}
+
+.react-datepicker__day {
+  width: 30px;
+  height: 30px;
+  line-height: 30px;
+  text-align: center;
+  cursor: pointer;
+}
+
+/* Responsive adjustments */
+@media (max-width: 480px) {
+  .date-picker-input {
+    min-width: 120px;
+    font-size: 14px;
+    padding: 10px 12px;
+  }
+  
+  .date-picker-container label {
+    font-size: 13px;
+  }
+}
+
+/* Loading and error states */
+.loading-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  margin: 40px 0;
+}
+
+.loading-container .spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid rgba(255, 255, 255, 0.3);
+  border-top: 3px solid #00d4ff;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.loading-container p {
+  color: white;
+  font-size: 16px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.error-container {
+  background: rgba(255, 107, 107, 0.2);
+  border: 1px solid rgba(255, 107, 107, 0.4);
+  border-radius: 12px;
+  padding: 20px;
+  margin: 20px 0;
+  text-align: center;
+  backdrop-filter: blur(15px);
+}
+
+.error-container p {
+  color: #ff6b6b;
+  margin: 0 0 16px 0;
+  font-size: 16px;
+}
+
+.retry-button {
+  background: linear-gradient(135deg, #ff6b6b, #ee5a52);
+  border: none;
+  border-radius: 8px;
+  padding: 10px 20px;
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.retry-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(255, 107, 107, 0.4);
+}
+
+.no-projects {
+  text-align: center;
+  margin: 40px 0;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 16px;
+}
+
+/* Project info styling */
+.project-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.project-info .name {
+  font-size: 13px;
+  font-weight: 600;
+  color: white;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.project-info .company {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.7);
+  font-weight: 400;
+}
+
+.project-info .status {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.6);
+  font-weight: 400;
+  font-style: italic;
 }
