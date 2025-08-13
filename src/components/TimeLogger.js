@@ -661,7 +661,7 @@ const TimeLogger = () => {
           
           {/* Drag hint for users */}
           <div className={`drag-hint ${hintHidden ? 'hidden' : ''}`}>
-            <div className="hint-text">Водите пальцем по/против часовой стрелки</div>
+            <div className="hint-text">Водите пальцем по или против часовой стрелки</div>
             <div className="hint-arrows">
               <div className="arrow arrow-left">↻</div>
               <div className="arrow arrow-right">↺</div>
