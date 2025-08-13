@@ -30,7 +30,7 @@ const TimeLogger = () => {
 
   // Calculate total hours
   const sumHours = useCallback(() => {
-    return Object.values(hoursPerProject).reduce((sum, hours) => sum + Math.max(0, hours || 0), 0);
+    return Math.round(Object.values(hoursPerProject).reduce((sum, hours) => sum + Math.max(0, hours || 0), 0));
   }, [hoursPerProject]);
 
   // Check if total hours exceed limit
@@ -400,34 +400,32 @@ const TimeLogger = () => {
       try {
         // Send data for each project with hours
         const promises = Object.entries(hoursPerProject).map(async ([projectId, hours]) => {
-          if (hours > 0) {
-            const projectPayload = {
-              member_id: parseInt(userId),
-              project_id: parseInt(projectId),
-              work_day: selectedDate.toISOString(),
-              work_hour: hours
-            };
-            
-            console.log(`Sending data for project ${projectId}:`, projectPayload);
-            
-            const response = await fetch('https://test.newpulse.pkz.icdc.io/project-service/api/v1/timesheet/perday', {
-              method: 'PUT',
-              headers: {
-                'Authorization': authToken,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify(projectPayload)
-            });
-            
-            if (response.ok) {
-              console.log(`Successfully sent data for project ${projectId}`);
-              return { projectId, success: true };
-            } else {
-              console.error(`Failed to send data for project ${projectId}:`, response.status);
-              return { projectId, success: false, status: response.status };
-            }
+          // Send all projects, including those with 0 hours
+          const projectPayload = {
+            member_id: parseInt(userId),
+            project_id: parseInt(projectId),
+            work_day: selectedDate.toISOString(),
+            work_hour: Math.round(hours) // Round hours to whole numbers before sending
+          };
+          
+          console.log(`Sending data for project ${projectId}:`, projectPayload);
+          
+          const response = await fetch('https://test.newpulse.pkz.icdc.io/project-service/api/v1/timesheet/perday', {
+            method: 'PUT',
+            headers: {
+              'Authorization': authToken,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(projectPayload)
+          });
+          
+          if (response.ok) {
+            console.log(`Successfully sent data for project ${projectId}`);
+            return { projectId, success: true };
+          } else {
+            console.error(`Failed to send data for project ${projectId}:`, response.status);
+            return { projectId, success: false, status: response.status };
           }
-          return { projectId, success: true, skipped: true };
         });
         
         const results = await Promise.all(promises);
