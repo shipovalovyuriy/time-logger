@@ -16,6 +16,7 @@ const TimeLogger = () => {
   const [hoursPerProject, setHoursPerProject] = useState({});
   const [activeId, setActiveId] = useState(null);
   const [dragging, setDragging] = useState(false);
+  const [hintHidden, setHintHidden] = useState(false); // Track if hint should be hidden
 
   const canvasRef = useRef(null);
   const ctxRef = useRef(null);
@@ -204,6 +205,42 @@ const TimeLogger = () => {
     }
   }, [projects, selectedDate, getWorkHoursForProjectAndDate, maxHours]);
 
+  // Animate segment filling when hours change
+  const animateSegmentFill = useCallback((projectId, fromHours, toHours) => {
+    if (fromHours === toHours) return;
+    
+    const duration = 200; // Animation duration in ms - made even faster
+    const startTime = Date.now();
+    
+    const animate = () => {
+      const elapsed = Date.now() - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      
+      // Easing function for smooth animation
+      const easeOutQuart = 1 - Math.pow(1 - progress, 4);
+      
+      const currentHours = fromHours + (toHours - fromHours) * easeOutQuart;
+      
+      // Update hours temporarily for animation
+      setHoursPerProject(prev => ({
+        ...prev,
+        [projectId]: currentHours
+      }));
+      
+      if (progress < 1) {
+        requestAnimationFrame(animate);
+      } else {
+        // Ensure final value is exact
+        setHoursPerProject(prev => ({
+          ...prev,
+          [projectId]: toHours
+        }));
+      }
+    };
+    
+    requestAnimationFrame(animate);
+  }, []);
+
   // Draw circle function
   const drawCircle = useCallback(() => {
     const ctx = ctxRef.current;
@@ -220,7 +257,7 @@ const TimeLogger = () => {
     ctx.lineCap = 'round';
     ctx.stroke();
 
-    // Draw project segments
+    // Draw project segments with animation
     const ordered = [...projects].sort((a, b) => a.id - b.id);
     let start = -Math.PI / 2;
     
@@ -229,12 +266,40 @@ const TimeLogger = () => {
       if (!hrs) return;
       
       const ang = (hrs / maxHours) * 2 * Math.PI;
+      
+      // Create gradient for smooth color transition
+      const gradient = ctx.createLinearGradient(
+        centerXRef.current + Math.cos(start) * radiusRef.current,
+        centerYRef.current + Math.sin(start) * radiusRef.current,
+        centerXRef.current + Math.cos(start + ang) * radiusRef.current,
+        centerYRef.current + Math.sin(start + ang) * radiusRef.current
+      );
+      
+      // Add multiple color stops for smooth transition
+      gradient.addColorStop(0, p.color);
+      gradient.addColorStop(0.5, p.color + 'CC'); // Slightly transparent
+      gradient.addColorStop(1, p.color);
+      
       ctx.beginPath();
       ctx.arc(centerXRef.current, centerYRef.current, radiusRef.current, start, start + ang);
-      ctx.strokeStyle = p.color;
+      ctx.strokeStyle = gradient;
       ctx.lineWidth = SEGMENT_STROKE;
       ctx.lineCap = 'round';
+      
+      // Add shadow for depth
+      ctx.shadowColor = p.color + '40';
+      ctx.shadowBlur = 8;
+      ctx.shadowOffsetX = 2;
+      ctx.shadowOffsetY = 2;
+      
       ctx.stroke();
+      
+      // Reset shadow
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 0;
+      
       start += ang;
     });
   }, [hoursPerProject, projects, maxHours]);
@@ -290,6 +355,7 @@ const TimeLogger = () => {
     e.preventDefault();
     setDragging(true);
     setStartDragAngle(getAngleFromEvent(e));
+    setHintHidden(true); // Hide hint on drag start
   }, [getAngleFromEvent]);
 
   const handleMove = useCallback((e) => {
@@ -334,10 +400,8 @@ const TimeLogger = () => {
         
         // If decreasing hours, just do it immediately
         if (hoursToAdd < 0) {
-          setHoursPerProject(prev => ({
-            ...prev,
-            [activeId]: Math.max(0, newProjectHours)
-          }));
+          const newHours = Math.max(0, newProjectHours);
+          animateSegmentFill(activeId, currentProjectHours, newHours);
           setStartDragAngle(angle);
           return;
         }
@@ -352,25 +416,22 @@ const TimeLogger = () => {
           const actualHoursToAdd = Math.max(0, Math.min(hoursToAdd, maxAllowedHours - currentProjectHours));
           
           if (actualHoursToAdd > 0) {
-            setHoursPerProject(prev => ({
-              ...prev,
-              [activeId]: Math.max(0, currentProjectHours + actualHoursToAdd)
-            }));
+            const finalHours = Math.max(0, currentProjectHours + actualHoursToAdd);
+            animateSegmentFill(activeId, currentProjectHours, finalHours);
           }
         } else {
-          setHoursPerProject(prev => ({
-            ...prev,
-            [activeId]: Math.max(0, newProjectHours)
-          }));
+          const finalHours = Math.max(0, newProjectHours);
+          animateSegmentFill(activeId, currentProjectHours, finalHours);
         }
         
         setStartDragAngle(angle);
       }
     }
-  }, [dragging, activeId, startDragAngle, hoursPerProject, maxHours]);
+  }, [dragging, activeId, startDragAngle, hoursPerProject, maxHours, animateSegmentFill]);
 
   const handleEnd = useCallback(() => {
     setDragging(false);
+    setHintHidden(false); // Show hint on drag end
   }, []);
 
   const handleSubmit = useCallback(async () => {
@@ -591,8 +652,21 @@ const TimeLogger = () => {
                 </svg>
               )}
             </div>
+            
+            {/* Hours indicator inside circle under button */}
+            <div className="hours-indicator">
+              {Math.round(hoursPerProject[activeId] || 0)} ч
+            </div>
           </div>
-          <div className="hours">{Math.round(hoursPerProject[activeId] || 0)} ч</div>
+          
+          {/* Drag hint for users */}
+          <div className={`drag-hint ${hintHidden ? 'hidden' : ''}`}>
+            <div className="hint-text">Водите пальцем по или против часовой стрелки для заполнения часов</div>
+            <div className="hint-arrows">
+              <div className="arrow arrow-left">↻</div>
+              <div className="arrow arrow-right">↺</div>
+            </div>
+          </div>
         </>
       )}
 

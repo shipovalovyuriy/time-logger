@@ -300,6 +300,7 @@ body {
   margin: 0 auto 20px;
   aspect-ratio: 1;
   flex-shrink: 0;
+  transition: all 0.3s ease;
 }
 
 .circle-container canvas {
@@ -307,6 +308,25 @@ body {
   height: 100%;
   display: block;
   border-radius: 50%;
+  transition: all 0.3s ease;
+  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.15));
+}
+
+/* Smooth segment animation */
+.circle-container.animating canvas {
+  animation: segmentPulse 0.2s ease-out;
+}
+
+@keyframes segmentPulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.02); }
+  100% { transform: scale(1); }
+}
+
+/* Segment hover effect */
+.circle-container:hover canvas {
+  filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.2));
+  transform: scale(1.01);
 }
 
 .center-button {
@@ -568,4 +588,102 @@ body {
     font-size: 16px;
     margin-top: 12px;
   }
+}
+
+/* Drag hint styles */
+.drag-hint {
+  text-align: center;
+  margin: 15px 0;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(10px);
+  animation: hintPulse 3s ease-in-out infinite;
+}
+
+.hint-text {
+  color: white;
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 8px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.hint-arrows {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 20px;
+}
+
+.arrow {
+  font-size: 24px;
+  color: #00d4ff;
+  animation: arrowFloat 2s ease-in-out infinite;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.arrow-left {
+  animation-delay: 0s;
+}
+
+.arrow-right {
+  animation-delay: 1s;
+}
+
+/* Hint animations */
+@keyframes hintPulse {
+  0%, 100% { 
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.2);
+  }
+  50% { 
+    background: rgba(255, 255, 255, 0.15);
+    border-color: rgba(0, 212, 255, 0.4);
+  }
+}
+
+@keyframes arrowFloat {
+  0%, 100% { 
+    transform: translateY(0) scale(1);
+    opacity: 0.7;
+  }
+  50% { 
+    transform: translateY(-5px) scale(1.1);
+    opacity: 1;
+  }
+}
+
+/* Hide hint after first interaction */
+.drag-hint.hidden {
+  opacity: 0;
+  transform: scale(0.8);
+  pointer-events: none;
+  transition: all 0.5s ease;
+}
+
+/* Hours indicator inside circle */
+.hours-indicator {
+  position: absolute;
+  top: 65%;
+  left: 50%;
+  transform: translateX(-50%);
+  color: white;
+  font-size: 16px;
+  font-weight: 600;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+  z-index: 5;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 6px 12px;
+  border-radius: 20px;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  transition: all 0.3s ease;
+}
+
+.hours-indicator:hover {
+  background: rgba(0, 0, 0, 0.5);
+  border-color: rgba(255, 255, 255, 0.4);
+  transform: translateX(-50%) scale(1.05);
 }
