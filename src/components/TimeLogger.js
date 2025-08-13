@@ -362,6 +362,8 @@ const TimeLogger = () => {
     // Change icon to checkmark
     setIsSubmitted(true);
     
+    console.log('Button clicked - setting isSubmitted to true');
+    
     const payload = { 
       activeId, 
       hoursPerProject, 
@@ -425,12 +427,30 @@ const TimeLogger = () => {
       console.error('No auth token available');
     }
     
-    // Reset animation after 2 seconds
-    setTimeout(() => {
-      setIsAnimating(false);
-      setIsSubmitted(false);
-    }, 2000);
+    // Don't reset animation - let it stay as checkmark until hours change
+    // The button will only reset when hoursPerProject changes
   }, [activeId, hoursPerProject, sumHours, maxHours, selectedDate]);
+
+  // Track previous hours to detect changes
+  const prevHoursRef = useRef({});
+
+  // Reset button state when hours change
+  useEffect(() => {
+    if (isSubmitted && Object.keys(prevHoursRef.current).length > 0) {
+      // Check if hours actually changed
+      const currentHours = JSON.stringify(hoursPerProject);
+      const prevHours = JSON.stringify(prevHoursRef.current);
+      
+      if (currentHours !== prevHours) {
+        console.log('Hours changed - resetting button state');
+        setIsAnimating(false);
+        setIsSubmitted(false);
+      }
+    }
+    
+    // Update previous hours reference
+    prevHoursRef.current = { ...hoursPerProject };
+  }, [hoursPerProject, isSubmitted]);
 
   // Add event listeners
   useEffect(() => {
@@ -463,12 +483,8 @@ const TimeLogger = () => {
 
   return (
     <>
-      <header>Выставление часов</header>
-      
       <div className="date-picker-container">
-        <label htmlFor="date-picker">Дата:</label>
         <DatePicker
-          id="date-picker"
           selected={selectedDate}
           onChange={(date) => {
             setSelectedDate(date);
@@ -494,6 +510,10 @@ const TimeLogger = () => {
           maxDate={new Date()}
           className="date-picker-input"
           placeholderText="Выберите дату"
+          showYearDropdown={true}
+          showMonthDropdown={true}
+          dropdownMode="select"
+          openToDate={selectedDate}
         />
       </div>
 
@@ -546,12 +566,12 @@ const TimeLogger = () => {
               title={isSubmitted ? "Часы залогированы!" : "Внести часы"}
             >
               {isSubmitted ? (
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M20 6L9 17l-5-5" />
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M20 6L9 17l-5-5" stroke="#ffffff" />
                 </svg>
               ) : (
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 5v14M5 12h14" />
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 5v14M5 12h14" stroke="#ffffff" />
                 </svg>
               )}
             </div>
