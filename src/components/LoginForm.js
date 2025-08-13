@@ -1,20 +1,30 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import './LoginForm.css';
+import storage from '../utils/storage';
 
 const LoginForm = ({ onLoginSuccess }) => {
-  const [credentials, setCredentials] = useState({
-    login: '',
-    password: ''
-  });
+  const [login, setLogin] = useState('');
+  const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
+  useEffect(() => {
+    // Check if localStorage is available
+    const storageInfo = storage.getInfo();
+    console.log('LoginForm: Storage info:', storageInfo);
+    
+    if (!storageInfo.available) {
+      setError('localStorage недоступен в вашем браузере. Приложение не может работать.');
+    }
+  }, []);
+
   const handleInputChange = (e) => {
     const { name, value } = e.target;
-    setCredentials(prev => ({
-      ...prev,
-      [name]: value
-    }));
+    if (name === 'login') {
+      setLogin(value);
+    } else if (name === 'password') {
+      setPassword(value);
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -23,27 +33,59 @@ const LoginForm = ({ onLoginSuccess }) => {
     setError('');
 
     try {
+      console.log('Attempting login with:', { login, password });
+      
       const response = await fetch('https://test.newpulse.pkz.icdc.io/auth-service/api/v1/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          login: credentials.login,
-          pass: credentials.password
-        })
+        body: JSON.stringify({ login, pass: password })
       });
 
+      console.log('Login response status:', response.status);
+      
       if (response.ok) {
         const data = await response.json();
-        localStorage.setItem('authToken', data.token || 'authenticated');
-        onLoginSuccess();
+        console.log('Login response data:', data);
+        
+        // Try to save token to localStorage using utility
+        // Use 'message' field from API response as the token
+        const tokenValue = `Bearer ${data.message || data.token || data.accessToken || data.authToken}`;
+        console.log('Saving token to localStorage:', tokenValue);
+        
+        const saveSuccess = storage.setItem('token', tokenValue);
+        
+        if (saveSuccess) {
+          // Verify it was saved
+          const savedToken = storage.getItem('token');
+          console.log('Verified saved token:', savedToken);
+          
+          if (savedToken) {
+            console.log('Token successfully saved to localStorage');
+            
+            // Also save user info if available
+            if (data.userId || data.member_id) {
+              storage.setItem('userId', data.userId || data.member_id);
+            }
+            
+            onLoginSuccess();
+          } else {
+            console.error('Failed to save token to localStorage');
+            setError('Ошибка сохранения токена в браузере. Проверьте настройки браузера.');
+          }
+        } else {
+          console.error('Storage utility failed to save token');
+          setError('Ошибка сохранения в браузере. Проверьте настройки браузера.');
+        }
       } else {
-        const errorData = await response.json();
-        setError(errorData.message || 'Ошибка авторизации');
+        const errorData = await response.text();
+        console.error('Login failed:', response.status, errorData);
+        setError(`Ошибка входа: ${response.status} - ${errorData}`);
       }
-    } catch (err) {
-      setError('Ошибка соединения с сервером');
+    } catch (error) {
+      console.error('Network error:', error);
+      setError(`Ошибка сети: ${error.message}`);
     } finally {
       setIsLoading(false);
     }
@@ -64,7 +106,7 @@ const LoginForm = ({ onLoginSuccess }) => {
               type="text"
               id="login"
               name="login"
-              value={credentials.login}
+              value={login}
               onChange={handleInputChange}
               placeholder="Введите логин"
               required
@@ -78,7 +120,7 @@ const LoginForm = ({ onLoginSuccess }) => {
               type="password"
               id="password"
               name="password"
-              value={credentials.password}
+              value={password}
               onChange={handleInputChange}
               placeholder="Введите пароль"
               required

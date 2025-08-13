@@ -2,16 +2,29 @@ import React, { useState, useEffect } from 'react';
 import './App.css';
 import TimeLogger from './components/TimeLogger';
 import LoginForm from './components/LoginForm';
+import storage from './utils/storage';
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   useEffect(() => {
-    // Check if user is already authenticated
-    const token = localStorage.getItem('authToken');
+    console.log('App: Checking localStorage for token...');
+    const storageInfo = storage.getInfo();
+    console.log('App: Storage info:', storageInfo);
+    
+    const token = storage.getItem('token');
+    console.log('App: Found token in localStorage:', token ? 'YES' : 'NO');
+    
     if (token) {
+      console.log('App: Token value:', token);
       setIsAuthenticated(true);
+    } else {
+      console.log('App: No token found, user not authenticated');
     }
+    
+    // Debug localStorage state
+    console.log('App: All localStorage keys:', storage.getKeys());
+    console.log('App: localStorage length:', storageInfo.length);
   }, []);
 
   const handleLoginSuccess = () => {
@@ -19,7 +32,8 @@ function App() {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('authToken');
+    storage.removeItem('token');
+    storage.removeItem('userId');
     setIsAuthenticated(false);
   };
 

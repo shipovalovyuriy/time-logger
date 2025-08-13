@@ -1,65 +1,118 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
+import storage from '../utils/storage';
 import './TimeLogger.css';
 
 const TimeLogger = () => {
-  const [hoursPerProject, setHoursPerProject] = useState({});
-  const [activeId, setActiveId] = useState(null);
-  const [dragging, setDragging] = useState(false);
-  const [hoursAccumulator, setHoursAccumulator] = useState(0);
+  const [projects, setProjects] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [timesheetData, setTimesheetData] = useState([]); // Store full timesheet data
   const [startDragAngle, setStartDragAngle] = useState(0);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [isAnimating, setIsAnimating] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date());
-  const [projects, setProjects] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [hoursPerProject, setHoursPerProject] = useState({});
+  const [activeId, setActiveId] = useState(null);
+  const [dragging, setDragging] = useState(false);
 
   const canvasRef = useRef(null);
   const ctxRef = useRef(null);
   const centerXRef = useRef(0);
   const centerYRef = useRef(0);
   const radiusRef = useRef(0);
+  const maxHours = 8; // Maximum total hours per day
 
+  // Canvas drawing constants
   const BASE_STROKE = 26;
   const SEGMENT_STROKE = 30;
-  const maxHours = 8;
 
-  // Generate colors for projects
-  const generateProjectColors = (count) => {
+  // Calculate total hours
+  const sumHours = useCallback(() => {
+    return Object.values(hoursPerProject).reduce((sum, hours) => sum + Math.max(0, hours || 0), 0);
+  }, [hoursPerProject]);
+
+  // Check if total hours exceed limit
+  const totalHours = sumHours();
+
+  // Add hours with limit checking
+  const addHours = useCallback((projectId, hours) => {
+    setHoursPerProject(prev => {
+      const currentHours = Math.max(0, prev[projectId] || 0); // Ensure no negative values
+      const newHours = Math.max(0, Math.round(currentHours + hours)); // Round to whole numbers
+      
+      // Check if adding these hours would exceed the total limit
+      const currentTotal = Object.values(prev).reduce((sum, h) => sum + Math.max(0, h), 0) - currentHours;
+      const wouldExceedLimit = currentTotal + newHours > maxHours;
+      
+      if (wouldExceedLimit) {
+        // Calculate how many hours can be added without exceeding limit
+        const maxAllowedHours = maxHours - currentTotal;
+        const actualHoursToAdd = Math.max(0, Math.round(maxAllowedHours)); // Round to whole numbers
+        
+        console.log(`Cannot add ${hours} hours. Maximum allowed: ${actualHoursToAdd}`);
+        return {
+          ...prev,
+          [projectId]: Math.max(0, currentHours + actualHoursToAdd)
+        };
+      }
+      
+      return {
+        ...prev,
+        [projectId]: newHours
+      };
+    });
+  }, [maxHours]);
+
+  // Generate random color for projects
+  const getRandomColor = () => {
     const colors = [
-      '#667eea', '#764ba2', '#f093fb', '#f5576c', '#4facfe',
-      '#00f2fe', '#43e97b', '#38f9d7', '#fa709a', '#fee140',
-      '#a8edea', '#fed6e3', '#ffecd2', '#fcb69f', '#ff9a9e',
-      '#fecfef', '#fecfef', '#ffecd2', '#fcb69f', '#ff9a9e'
+      '#FF6B6B', // Яркий красный
+      '#4ECDC4', // Яркий бирюзовый
+      '#45B7D1', // Яркий синий
+      '#96CEB4', // Яркий зеленый
+      '#FFEAA7', // Яркий желтый
+      '#DDA0DD', // Яркий фиолетовый
+      '#98D8C8', // Яркий мятный
+      '#F7DC6F', // Яркий золотой
+      '#BB8FCE', // Яркий лавандовый
+      '#85C1E9', // Яркий голубой
+      '#FF9F43', // Яркий оранжевый
+      '#00D2D3', // Яркий циан
+      '#FF6B9D', // Яркий розовый
+      '#4ECDC4', // Яркий изумрудный
+      '#A8E6CF', // Яркий салатовый
+      '#FFB3BA'  // Яркий коралловый
     ];
-    
-    return colors.slice(0, count);
+    return colors[Math.floor(Math.random() * colors.length)];
   };
 
   // Fetch timesheet data
   const fetchTimesheet = useCallback(async () => {
     try {
-      setIsLoading(true);
-      setError('');
+      console.log('TimeLogger: Starting to fetch timesheet...');
       
-      // Get user ID and token from localStorage
-      const userId = localStorage.getItem('userId') || '3227'; // Default fallback
-      const authToken = localStorage.getItem('token');
+      // Get token from localStorage
+      const authToken = storage.getItem('token');
+      console.log('TimeLogger: Auth token from localStorage:', authToken ? 'FOUND' : 'NOT FOUND');
       
       if (!authToken) {
-        throw new Error('Токен авторизации не найден. Пожалуйста, войдите в систему.');
+        console.error('TimeLogger: No auth token found in localStorage');
+        setError('Токен авторизации не найден. Пожалуйста, войдите в систему.');
+        return;
       }
-      
+
+      // Get user ID from localStorage or use default
+      const userId = storage.getItem('userId') || '3227';
+      console.log('TimeLogger: Using user ID:', userId);
+
       // Calculate month start and end based on selected date
-      const selectedYear = selectedDate.getFullYear();
-      const selectedMonth = selectedDate.getMonth() + 1; // getMonth() returns 0-11
-      const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
+      const monthStart = `${selectedDate.getDate()}.${selectedDate.getMonth() + 1}.${selectedDate.getFullYear()}`;
+      const monthEnd = `${new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 0).getDate()}.${selectedDate.getMonth() + 1}.${selectedDate.getFullYear()}`;
       
-      const monthStart = `1.${selectedMonth}.${selectedYear}`;
-      const monthEnd = `${daysInMonth}.${selectedMonth}.${selectedYear}`;
-      
+      console.log('TimeLogger: Fetching with params:', { monthStart, monthEnd });
+
       const response = await fetch(
         `https://test.newpulse.pkz.icdc.io/project-service/api/v1/timesheet/list?member_id=${userId}&month_start=${monthStart}&month_end=${monthEnd}`,
         {
@@ -71,74 +124,65 @@ const TimeLogger = () => {
         }
       );
 
+      console.log('TimeLogger: API response status:', response.status);
+
+      if (response.status === 401 || response.status === 403) {
+        console.error('TimeLogger: Authentication failed, clearing token');
+        storage.removeItem('token');
+        setError('Сессия истекла. Пожалуйста, войдите в систему снова.');
+        return;
+      }
+
       if (!response.ok) {
-        if (response.status === 401) {
-          throw new Error('Токен истек. Пожалуйста, войдите в систему снова.');
-        } else if (response.status === 403) {
-          throw new Error('Доступ запрещен. Проверьте права доступа.');
-        } else {
-          throw new Error(`Ошибка загрузки табеля: ${response.status}`);
-        }
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
 
       const data = await response.json();
-      
-      if (!data.status || !data.result) {
-        throw new Error('Неверный формат ответа от сервера');
-      }
-      
-      // Extract unique projects from timesheet data
-      const projectMap = new Map();
-      
-      data.result.forEach(item => {
-        if (item.project && item.is_active) {
-          const projectId = item.project.id;
-          
-          if (!projectMap.has(projectId)) {
-            projectMap.set(projectId, {
-              id: projectId,
-              name: item.project.project_name,
-              company: item.project.customer_short_name,
-              status: item.project.project_status,
-              isActive: item.is_active,
-              direction: item.project.direction,
-              projectLevel: item.project.project_level,
-              projectType: item.project.project_type,
-              healthStatus: item.project.project_health_status,
-              startDate: item.project.start_at,
-              deadlineDate: item.project.deadline_at,
-              factDeadlineDate: item.project.fact_deadline_at,
-              contractNum: item.project.contract_num,
-              sysProjectId: item.project.sys_project_id,
-              timesheetData: item
-            });
+      console.log('TimeLogger: API response data:', data);
+
+      // Store full timesheet data
+      const timesheetData = data.result || data;
+      setTimesheetData(timesheetData);
+
+      // Parse the response and extract unique active projects
+      const uniqueProjects = [];
+      const seenProjects = new Set();
+
+      if (timesheetData && Array.isArray(timesheetData)) {
+        timesheetData.forEach(item => {
+          if (item.project && item.is_active) {
+            const projectKey = `${item.project.id}_${item.project.project_name}`;
+            if (!seenProjects.has(projectKey) && item.project.project_status === 'Активный') {
+              seenProjects.add(projectKey);
+              uniqueProjects.push({
+                id: item.project.id,
+                name: item.project.project_name,
+                company: item.project.customer_short_name || 'Неизвестная компания',
+                status: item.project.project_status,
+                direction: item.project.direction || 'Не указано',
+                color: getRandomColor(),
+                // Additional project info
+                startDate: item.project.start_at,
+                deadlineDate: item.project.deadline_at,
+                factDeadlineDate: item.project.fact_deadline_at,
+                projectLevel: item.project.project_level,
+                projectType: item.project.project_type,
+                healthStatus: item.project.project_health_status,
+                contractNum: item.project.contract_num,
+                sysProjectId: item.project.sys_project_id
+              });
+            }
           }
-        }
-      });
-      
-      const transformedProjects = Array.from(projectMap.values());
-      setProjects(transformedProjects);
-      
-      // Set active project to first one
-      if (transformedProjects.length > 0) {
-        setActiveId(transformedProjects[0].id);
+        });
       }
 
-      // Initialize hours per project
-      const initialHours = Object.fromEntries(
-        transformedProjects.map(p => [p.id, 0])
-      );
-      setHoursPerProject(initialHours);
-
-    } catch (err) {
-      setError(err.message);
-      console.error('Error fetching timesheet:', err);
-      
-      // If token is invalid, redirect to login
-      if (err.message.includes('токен') || err.message.includes('авторизации')) {
-        localStorage.removeItem('token');
-        // You can add redirect logic here if needed
-      }
+      console.log('TimeLogger: Parsed unique projects:', uniqueProjects);
+      console.log('TimeLogger: Total projects found:', uniqueProjects.length);
+      setProjects(uniqueProjects);
+      setError(null);
+    } catch (error) {
+      console.error('TimeLogger: Error fetching timesheet:', error);
+      setError(`Ошибка загрузки проектов: ${error.message}`);
     } finally {
       setIsLoading(false);
     }
@@ -149,28 +193,45 @@ const TimeLogger = () => {
     fetchTimesheet();
   }, [fetchTimesheet]);
 
-  // Generate colors for projects
-  const projectColors = useMemo(() => {
-    const colors = generateProjectColors(projects.length);
-    return projects.map((project, index) => ({
-      ...project,
-      color: colors[index]
-    }));
-  }, [projects]);
+  // Get work hours for selected project and date
+  const getWorkHoursForProjectAndDate = useCallback((projectId, date) => {
+    if (!timesheetData || !Array.isArray(timesheetData)) return 0;
+    
+    const dateString = date.toISOString().split('T')[0]; // Format as YYYY-MM-DD
+    
+    const matchingEntry = timesheetData.find(item => 
+      item.project?.id === projectId && 
+      item.work_day && 
+      item.work_day.split('T')[0] === dateString
+    );
+    
+    return matchingEntry?.work_hour || 0;
+  }, [timesheetData]);
 
-  const sumHours = useCallback(() => {
-    return Object.values(hoursPerProject).reduce((a, b) => a + (b || 0), 0);
-  }, [hoursPerProject]);
+  // Initialize hours per project when projects change
+  useEffect(() => {
+    if (projects.length > 0) {
+      const initialHours = {};
+      let totalLoadedHours = 0;
+      
+      projects.forEach(project => {
+        const workHours = Math.max(0, Math.round(getWorkHoursForProjectAndDate(project.id, selectedDate))); // Round to whole numbers
+        // Ensure we don't exceed the 8-hour limit
+        const remainingHours = maxHours - totalLoadedHours;
+        const allowedHours = Math.min(workHours, remainingHours);
+        
+        initialHours[project.id] = Math.max(0, Math.round(allowedHours)); // Round to whole numbers
+        totalLoadedHours += allowedHours;
+      });
+      
+      setHoursPerProject(initialHours);
+      
+      // Set first project as active
+      setActiveId(projects[0].id);
+    }
+  }, [projects, selectedDate, getWorkHoursForProjectAndDate, maxHours]);
 
-  const sumHoursExcept = useCallback((id) => {
-    return Object.entries(hoursPerProject).reduce((a, [k, v]) => 
-      a + (parseInt(k) === id ? 0 : (v || 0)), 0);
-  }, [hoursPerProject]);
-
-  const clamp = useCallback((v, min, max) => {
-    return Math.max(min, Math.min(max, v));
-  }, []);
-
+  // Draw circle function
   const drawCircle = useCallback(() => {
     const ctx = ctxRef.current;
     const canvas = canvasRef.current;
@@ -187,11 +248,11 @@ const TimeLogger = () => {
     ctx.stroke();
 
     // Draw project segments
-    const ordered = [...projectColors].sort((a, b) => a.id - b.id);
+    const ordered = [...projects].sort((a, b) => a.id - b.id);
     let start = -Math.PI / 2;
     
     ordered.forEach(p => {
-      const hrs = hoursPerProject[p.id] || 0;
+      const hrs = Math.max(0, hoursPerProject[p.id] || 0); // Ensure no negative values
       if (!hrs) return;
       
       const ang = (hrs / maxHours) * 2 * Math.PI;
@@ -203,7 +264,7 @@ const TimeLogger = () => {
       ctx.stroke();
       start += ang;
     });
-  }, [hoursPerProject, projectColors, maxHours]);
+  }, [hoursPerProject, projects, maxHours]);
 
   // Initialize canvas
   useEffect(() => {
@@ -231,73 +292,57 @@ const TimeLogger = () => {
 
   // Update canvas when projects change
   useEffect(() => {
-    if (projectColors.length > 0) {
+    if (projects.length > 0) {
       drawCircle();
     }
-  }, [projectColors, drawCircle]);
+  }, [projects, drawCircle]);
 
+  // Get angle from mouse/touch event
   const getAngleFromEvent = useCallback((e) => {
     const canvas = canvasRef.current;
     if (!canvas) return 0;
     
-    const r = canvas.getBoundingClientRect();
-    const cx = (e.touches ? e.touches[0].clientX : e.clientX) - r.left - centerXRef.current;
-    const cy = (e.touches ? e.touches[0].clientY : e.clientY) - r.top - centerYRef.current;
-    return Math.atan2(cy, cx);
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX || e.touches[0].clientX) - rect.left - rect.width / 2;
+    const y = (e.clientY || e.touches[0].clientY) - rect.top - rect.height / 2;
+    return Math.atan2(y, x);
   }, []);
 
-  const handleStart = useCallback((e) => {
+  // Handle drag start
+  const handleDragStart = useCallback((e) => {
     e.preventDefault();
     setDragging(true);
-    setHoursAccumulator(0);
     setStartDragAngle(getAngleFromEvent(e));
   }, [getAngleFromEvent]);
 
   const handleMove = useCallback((e) => {
-    if (!dragging) return;
-    e.preventDefault();
-
-    const cur = getAngleFromEvent(e);
-    let d = cur - startDragAngle;
-    if (d < -Math.PI) d += 2 * Math.PI;
-    if (d > Math.PI) d -= 2 * Math.PI;
+    if (!dragging || !activeId) return;
     
-    setStartDragAngle(cur);
+    const canvas = canvasRef.current;
+    if (!canvas) return;
     
-    const deltaHours = (d / (2 * Math.PI)) * maxHours;
-    const newAccumulator = hoursAccumulator + deltaHours;
-    setHoursAccumulator(newAccumulator);
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX || e.touches[0].clientX) - rect.left - rect.width / 2;
+    const y = (e.clientY || e.touches[0].clientY) - rect.top - rect.height / 2;
     
-    const step = newAccumulator > 0 ? Math.floor(newAccumulator) : Math.ceil(newAccumulator);
+    const angle = Math.atan2(y, x);
+    const deltaAngle = angle - startDragAngle;
     
-    if (step !== 0) {
-      const capacityLeft = maxHours - sumHoursExcept(activeId);
-      const current = hoursPerProject[activeId] || 0;
-      const newVal = clamp(current + step, 0, Math.min(maxHours, current + capacityLeft));
-      const applied = newVal - current;
+    if (Math.abs(deltaAngle) > 0.1) {
+      const hoursToAdd = Math.floor(deltaAngle / (Math.PI / 4)) * 0.5;
       
-      if (applied !== 0) {
-        setHoursPerProject(prev => ({
-          ...prev,
-          [activeId]: newVal
-        }));
-        setHoursAccumulator(newAccumulator - applied);
-      } else {
-        setHoursAccumulator(0);
+      if (hoursToAdd !== 0) {
+        addHours(activeId, hoursToAdd);
+        setStartDragAngle(angle);
       }
     }
-  }, [dragging, startDragAngle, getAngleFromEvent, maxHours, hoursAccumulator, sumHoursExcept, activeId, hoursPerProject, clamp]);
+  }, [dragging, activeId, startDragAngle, addHours]);
 
   const handleEnd = useCallback(() => {
     setDragging(false);
-    setHoursAccumulator(0);
   }, []);
 
-  const handleProjectClick = useCallback((id) => {
-    setActiveId(id);
-  }, []);
-
-  const handleSubmit = useCallback(() => {
+  const handleSubmit = useCallback(async () => {
     // Add bounce animation
     setIsAnimating(true);
     
@@ -312,24 +357,59 @@ const TimeLogger = () => {
       date: selectedDate.toISOString().split('T')[0] // Format as YYYY-MM-DD
     };
     
-    // Check if Telegram WebApp is available
-    if (window.Telegram?.WebApp) {
-      window.Telegram.WebApp.sendData(JSON.stringify(payload));
+    console.log('Submit payload:', payload);
+    
+    // Get auth token
+    const authToken = storage.getItem('token');
+    const userId = storage.getItem('userId') || '3227';
+    
+    if (authToken) {
+      try {
+        // Send data for each project with hours
+        const promises = Object.entries(hoursPerProject).map(async ([projectId, hours]) => {
+          if (hours > 0) {
+            const projectPayload = {
+              member_id: parseInt(userId),
+              project_id: parseInt(projectId),
+              work_day: selectedDate.toISOString(),
+              work_hour: hours
+            };
+            
+            console.log(`Sending data for project ${projectId}:`, projectPayload);
+            
+            const response = await fetch('https://test.newpulse.pkz.icdc.io/project-service/api/v1/timesheet/perday', {
+              method: 'PUT',
+              headers: {
+                'Authorization': authToken,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(projectPayload)
+            });
+            
+            if (response.ok) {
+              console.log(`Successfully sent data for project ${projectId}`);
+              return { projectId, success: true };
+            } else {
+              console.error(`Failed to send data for project ${projectId}:`, response.status);
+              return { projectId, success: false, status: response.status };
+            }
+          }
+          return { projectId, success: true, skipped: true };
+        });
+        
+        const results = await Promise.all(promises);
+        console.log('All API requests completed:', results);
+        
+        // Check if Telegram WebApp is available
+        if (window.Telegram?.WebApp) {
+          window.Telegram.WebApp.sendData(JSON.stringify(payload));
+        }
+        
+      } catch (error) {
+        console.error('Error sending data to API:', error);
+      }
     } else {
-      console.log('Submit payload:', payload);
-      
-      // You can also send to your API here if needed
-      // const authToken = localStorage.getItem('token');
-      // if (authToken) {
-      //   fetch('your-api-endpoint', {
-      //     method: 'POST',
-      //     headers: {
-      //       'Authorization': authToken,
-      //       'Content-Type': 'application/json',
-      //     },
-      //     body: JSON.stringify(payload)
-      //   });
-      // }
+      console.error('No auth token available');
     }
     
     // Reset animation after 2 seconds
@@ -344,22 +424,22 @@ const TimeLogger = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    canvas.addEventListener('mousedown', handleStart);
+    canvas.addEventListener('mousedown', handleDragStart);
     window.addEventListener('mousemove', handleMove);
     window.addEventListener('mouseup', handleEnd);
-    canvas.addEventListener('touchstart', handleStart, { passive: false });
+    canvas.addEventListener('touchstart', handleDragStart, { passive: false });
     window.addEventListener('touchmove', handleMove, { passive: false });
     window.addEventListener('touchend', handleEnd);
 
     return () => {
-      canvas.removeEventListener('mousedown', handleStart);
+      canvas.removeEventListener('mousedown', handleDragStart);
       window.removeEventListener('mousemove', handleMove);
       window.removeEventListener('mouseup', handleEnd);
-      canvas.removeEventListener('touchstart', handleStart);
+      canvas.removeEventListener('touchstart', handleDragStart);
       window.removeEventListener('touchmove', handleMove);
       window.removeEventListener('touchend', handleEnd);
     };
-  }, [handleStart, handleMove, handleEnd]);
+  }, [handleDragStart, handleMove, handleEnd]);
 
   // Initialize Telegram WebApp
   useEffect(() => {
@@ -377,7 +457,26 @@ const TimeLogger = () => {
         <DatePicker
           id="date-picker"
           selected={selectedDate}
-          onChange={(date) => setSelectedDate(date)}
+          onChange={(date) => {
+            setSelectedDate(date);
+            // Recalculate hours for new date
+            if (projects.length > 0) {
+              const newHours = {};
+              let totalLoadedHours = 0;
+              
+              projects.forEach(project => {
+                const workHours = Math.max(0, Math.round(getWorkHoursForProjectAndDate(project.id, date))); // Round to whole numbers
+                // Ensure we don't exceed the 8-hour limit
+                const remainingHours = maxHours - totalLoadedHours;
+                const allowedHours = Math.min(workHours, remainingHours);
+                
+                newHours[project.id] = Math.max(0, Math.round(allowedHours)); // Round to whole numbers
+                totalLoadedHours += allowedHours;
+              });
+              
+              setHoursPerProject(newHours);
+            }
+          }}
           dateFormat="dd.MM.yyyy"
           locale="ru"
           maxDate={new Date()}
@@ -406,24 +505,24 @@ const TimeLogger = () => {
         <>
           <div className="summary-title">Итоги по проектам</div>
           <div className="summary-total">
-            Всего: {sumHours()} / {maxHours} ч
+            <span className="total-label">Всего часов:</span>
+            <span className={`total-hours ${totalHours >= maxHours ? 'limit-reached' : ''}`}>
+              {totalHours}/{maxHours}
+            </span>
           </div>
           <div className="summary-list">
-            {projectColors.map(p => (
+            {projects.map(p => (
               <div
                 key={p.id}
-                className={`row ${p.id === activeId ? 'active' : ''}`}
-                onClick={() => handleProjectClick(p.id)}
+                className={`row ${activeId === p.id ? 'active' : ''}`}
+                onClick={() => setActiveId(p.id)}
               >
-                <div className="left">
-                  <span className="dot" style={{ background: p.color }}></span>
-                  <div className="project-info">
-                    <span className="name">{p.name}</span>
-                    <span className="company">{p.company}</span>
-                    <span className="status">{p.status} • {p.direction}</span>
-                  </div>
+                <div className="dot" style={{ backgroundColor: p.color }}></div>
+                <div className="name">{p.name}</div>
+                <div className="hrs">
+                  <span className="hours">{hoursPerProject[p.id] || 0}</span>
+                  <span className="unit">ч</span>
                 </div>
-                <div className="hrs">{(hoursPerProject[p.id] || 0)} ч</div>
               </div>
             ))}
           </div>
