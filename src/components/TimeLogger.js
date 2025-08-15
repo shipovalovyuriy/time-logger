@@ -221,19 +221,23 @@ const TimeLogger = () => {
       
       const currentHours = fromHours + (toHours - fromHours) * easeOutQuart;
       
+      // STRICT: Immediately set small values to 0
+      const cleanedHours = currentHours < 0.5 ? 0 : currentHours;
+      
       // Update hours temporarily for animation
       setHoursPerProject(prev => ({
         ...prev,
-        [projectId]: currentHours
+        [projectId]: cleanedHours
       }));
       
       if (progress < 1) {
         requestAnimationFrame(animate);
       } else {
-        // Ensure final value is exact
+        // Ensure final value is exact and cleaned
+        const finalCleanedHours = toHours < 0.5 ? 0 : toHours;
         setHoursPerProject(prev => ({
           ...prev,
-          [projectId]: toHours
+          [projectId]: finalCleanedHours
         }));
       }
     };
@@ -262,17 +266,28 @@ const TimeLogger = () => {
     let start = -Math.PI / 2;
     
     ordered.forEach(p => {
-      const hrs = Math.max(0, hoursPerProject[p.id] || 0); // Ensure no negative values
-      if (!hrs) return;
+      const hrs = hoursPerProject[p.id] || 0;
+      
+      // STRICT: Only draw segments with hours > 0
+      if (hrs <= 0) {
+        return; // Skip this project entirely
+      }
       
       const ang = (hrs / maxHours) * 2 * Math.PI;
+      
+      // Special handling for single project filling entire circle
+      let finalAngle = ang;
+      if (hrs >= maxHours) {
+        // Leave a tiny gap to prevent full circle issues
+        finalAngle = 2 * Math.PI - 0.01;
+      }
       
       // Create gradient for smooth color transition
       const gradient = ctx.createLinearGradient(
         centerXRef.current + Math.cos(start) * radiusRef.current,
         centerYRef.current + Math.sin(start) * radiusRef.current,
-        centerXRef.current + Math.cos(start + ang) * radiusRef.current,
-        centerYRef.current + Math.sin(start + ang) * radiusRef.current
+        centerXRef.current + Math.cos(start + finalAngle) * radiusRef.current,
+        centerYRef.current + Math.sin(start + finalAngle) * radiusRef.current
       );
       
       // Add multiple color stops for smooth transition
@@ -281,7 +296,7 @@ const TimeLogger = () => {
       gradient.addColorStop(1, p.color);
       
       ctx.beginPath();
-      ctx.arc(centerXRef.current, centerYRef.current, radiusRef.current, start, start + ang);
+      ctx.arc(centerXRef.current, centerYRef.current, radiusRef.current, start, start + finalAngle);
       ctx.strokeStyle = gradient;
       ctx.lineWidth = SEGMENT_STROKE;
       ctx.lineCap = 'round';
@@ -300,7 +315,7 @@ const TimeLogger = () => {
       ctx.shadowOffsetX = 0;
       ctx.shadowOffsetY = 0;
       
-      start += ang;
+      start += finalAngle;
     });
   }, [hoursPerProject, projects, maxHours]);
 
@@ -328,12 +343,40 @@ const TimeLogger = () => {
     return () => window.removeEventListener('resize', resizeCanvas);
   }, [drawCircle]);
 
-  // Update canvas when projects change
+  // Force cleanup of very small values
   useEffect(() => {
-    if (projects.length > 0) {
-      drawCircle();
-    }
-  }, [projects, drawCircle]);
+    const forceCleanup = () => {
+      const cleanedHours = {};
+      let hasChanges = false;
+      
+      Object.entries(hoursPerProject).forEach(([projectId, hours]) => {
+        if (hours < 0.5 && hours > 0) {
+          cleanedHours[projectId] = 0;
+          hasChanges = true;
+        }
+      });
+      
+      if (hasChanges) {
+        setHoursPerProject(prev => ({
+          ...prev,
+          ...cleanedHours
+        }));
+      }
+    };
+    
+    // Run cleanup immediately
+    forceCleanup();
+    
+    // Also run cleanup after a short delay to catch any missed values
+    const timeoutId = setTimeout(forceCleanup, 100);
+    
+    return () => clearTimeout(timeoutId);
+  }, [hoursPerProject]);
+
+  // Update canvas when hours change
+  useEffect(() => {
+    drawCircle();
+  }, [hoursPerProject, drawCircle]);
 
   // Get angle from mouse/touch event
   const getAngleFromEvent = useCallback((e) => {
@@ -370,20 +413,16 @@ const TimeLogger = () => {
     
     const angle = Math.atan2(y, x);
     
-    // Normalize angles to prevent jumps across 180° boundary
-    let normalizedStartAngle = startDragAngle;
-    let normalizedCurrentAngle = angle;
+    // Improved angle normalization to handle full rotations
+    let deltaAngle = angle - startDragAngle;
     
-    // Handle angle wrapping around the circle
-    if (Math.abs(angle - startDragAngle) > Math.PI) {
-      if (angle > startDragAngle) {
-        normalizedCurrentAngle = angle - 2 * Math.PI;
-      } else {
-        normalizedCurrentAngle = angle + 2 * Math.PI;
-      }
+    // Normalize delta angle to be within -π to π
+    while (deltaAngle > Math.PI) {
+      deltaAngle -= 2 * Math.PI;
     }
-    
-    const deltaAngle = normalizedCurrentAngle - normalizedStartAngle;
+    while (deltaAngle < -Math.PI) {
+      deltaAngle += 2 * Math.PI;
+    }
     
     if (Math.abs(deltaAngle) > 0.05) {
       // Convert angle to hours: positive delta = increase, negative = decrease
@@ -401,7 +440,9 @@ const TimeLogger = () => {
         // If decreasing hours, just do it immediately
         if (hoursToAdd < 0) {
           const newHours = Math.max(0, newProjectHours);
-          animateSegmentFill(activeId, currentProjectHours, newHours);
+          // STRICT: If hours are very small, set to 0 immediately
+          const finalHours = newHours < 0.5 ? 0 : newHours;
+          animateSegmentFill(activeId, currentProjectHours, finalHours);
           setStartDragAngle(angle);
           return;
         }
@@ -421,7 +462,9 @@ const TimeLogger = () => {
           }
         } else {
           const finalHours = Math.max(0, newProjectHours);
-          animateSegmentFill(activeId, currentProjectHours, finalHours);
+          // Special handling: ensure we don't exceed maxHours for single project
+          const clampedFinalHours = Math.min(finalHours, maxHours);
+          animateSegmentFill(activeId, currentProjectHours, clampedFinalHours);
         }
         
         setStartDragAngle(angle);
