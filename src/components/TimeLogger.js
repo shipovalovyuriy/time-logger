@@ -23,6 +23,7 @@ const TimeLogger = () => {
   const centerXRef = useRef(0);
   const centerYRef = useRef(0);
   const radiusRef = useRef(0);
+  const drawTimeoutRef = useRef(null);
   const maxHours = 8; // Maximum total hours per day
 
   // Canvas drawing constants
@@ -209,7 +210,7 @@ const TimeLogger = () => {
   const animateSegmentFill = useCallback((projectId, fromHours, toHours) => {
     if (fromHours === toHours) return;
     
-    const duration = 200; // Animation duration in ms - made even faster
+    const duration = 150; // Reduced duration for smoother animation
     const startTime = Date.now();
     
     const animate = () => {
@@ -251,11 +252,22 @@ const TimeLogger = () => {
     const canvas = canvasRef.current;
     if (!ctx || !canvas) return;
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Clear only the circle area instead of entire canvas to prevent flickering
+    const centerX = centerXRef.current;
+    const centerY = centerYRef.current;
+    const radius = radiusRef.current;
+    
+    // Clear only the circular area with a slightly larger radius to ensure clean edges
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius + 10, 0, Math.PI * 2);
+    ctx.clip();
+    ctx.clearRect(centerX - radius - 10, centerY - radius - 10, (radius + 10) * 2, (radius + 10) * 2);
+    ctx.restore();
     
     // Draw base circle
     ctx.beginPath();
-    ctx.arc(centerXRef.current, centerYRef.current, radiusRef.current, 0, Math.PI * 2);
+    ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
     ctx.strokeStyle = '#dfe6e9';
     ctx.lineWidth = BASE_STROKE;
     ctx.lineCap = 'round';
@@ -284,10 +296,10 @@ const TimeLogger = () => {
       
       // Create gradient for smooth color transition
       const gradient = ctx.createLinearGradient(
-        centerXRef.current + Math.cos(start) * radiusRef.current,
-        centerYRef.current + Math.sin(start) * radiusRef.current,
-        centerXRef.current + Math.cos(start + finalAngle) * radiusRef.current,
-        centerYRef.current + Math.sin(start + finalAngle) * radiusRef.current
+        centerX + Math.cos(start) * radius,
+        centerY + Math.sin(start) * radius,
+        centerX + Math.cos(start + finalAngle) * radius,
+        centerY + Math.sin(start + finalAngle) * radius
       );
       
       // Add multiple color stops for smooth transition
@@ -296,7 +308,7 @@ const TimeLogger = () => {
       gradient.addColorStop(1, p.color);
       
       ctx.beginPath();
-      ctx.arc(centerXRef.current, centerYRef.current, radiusRef.current, start, start + finalAngle);
+      ctx.arc(centerX, centerY, radius, start, start + finalAngle);
       ctx.strokeStyle = gradient;
       ctx.lineWidth = SEGMENT_STROKE;
       ctx.lineCap = 'round';
@@ -373,10 +385,31 @@ const TimeLogger = () => {
     return () => clearTimeout(timeoutId);
   }, [hoursPerProject]);
 
-  // Update canvas when hours change
+  // Throttled draw function to prevent excessive redraws
+  const throttledDrawCircle = useCallback(() => {
+    if (drawTimeoutRef.current) {
+      clearTimeout(drawTimeoutRef.current);
+    }
+    
+    drawTimeoutRef.current = setTimeout(() => {
+      drawCircle();
+      drawTimeoutRef.current = null;
+    }, 16); // ~60fps
+  }, [drawCircle]);
+
+  // Update canvas when hours change with throttling
   useEffect(() => {
-    drawCircle();
-  }, [hoursPerProject, drawCircle]);
+    throttledDrawCircle();
+  }, [hoursPerProject, throttledDrawCircle]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (drawTimeoutRef.current) {
+        clearTimeout(drawTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Get angle from mouse/touch event
   const getAngleFromEvent = useCallback((e) => {
