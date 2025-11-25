@@ -65,6 +65,9 @@ const TimeLogger = () => {
 
   // Fetch timesheet data
   const fetchTimesheet = useCallback(async () => {
+    // Show loader while data is being requested
+    setIsLoading(true);
+
     try {
       console.log('TimeLogger: Starting to fetch timesheet...');
       
