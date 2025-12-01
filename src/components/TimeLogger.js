@@ -206,6 +206,7 @@ const TimeLogger = ({ onSessionExpired }) => {
     const ratio = Math.min(Math.max((clientX - rect.left) / rect.width, 0), 1);
 
     const desiredHours = Math.max(0, Math.min(maxHours, ratio * maxHours));
+    const currentProjectHours = hoursPerProject[projectId] || 0;
     const otherTotal = Object.entries(hoursPerProject).reduce((sum, [id, hours]) => {
       if (Number(id) === Number(projectId)) return sum;
       return sum + Math.max(0, hours || 0);
