@@ -212,11 +212,11 @@ const TimeLogger = ({ onSessionExpired }) => {
     }, 0);
 
     const maxForProject = Math.max(0, maxHours - otherTotal);
-    const finalHours = Math.min(desiredHours, maxForProject);
+    const finalHours = Math.round(Math.min(desiredHours, maxForProject));
 
     setHoursPerProject(prev => ({
       ...prev,
-      [projectId]: parseFloat(finalHours.toFixed(1))
+      [projectId]: finalHours
     }));
 
     setActiveId(projectId);
@@ -431,7 +431,7 @@ const TimeLogger = ({ onSessionExpired }) => {
                   <div className="project-content">
                     <div className="project-name">{p.name}</div>
                     <div className="project-hours">
-                      {parseFloat((hoursPerProject[p.id] || 0).toFixed(1))} ч
+                      {Math.round(hoursPerProject[p.id] || 0)} ч
                     </div>
                   </div>
                 </div>
