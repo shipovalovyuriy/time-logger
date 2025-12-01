@@ -9,26 +9,13 @@ const TimeLogger = ({ onSessionExpired }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [timesheetData, setTimesheetData] = useState([]); // Store full timesheet data
-  const [startDragAngle, setStartDragAngle] = useState(0);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [isAnimating, setIsAnimating] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [hoursPerProject, setHoursPerProject] = useState({});
   const [activeId, setActiveId] = useState(null);
-  const [dragging, setDragging] = useState(false);
-  const [hintHidden, setHintHidden] = useState(false); // Track if hint should be hidden
-
-  const canvasRef = useRef(null);
-  const ctxRef = useRef(null);
-  const centerXRef = useRef(0);
-  const centerYRef = useRef(0);
-  const radiusRef = useRef(0);
-  const drawTimeoutRef = useRef(null);
+  const [draggingProjectId, setDraggingProjectId] = useState(null);
   const maxHours = 8; // Maximum total hours per day
-
-  // Canvas drawing constants
-  const BASE_STROKE = 26;
-  const SEGMENT_STROKE = 30;
 
   // Calculate total hours
   const sumHours = useCallback(() => {
@@ -211,308 +198,45 @@ const TimeLogger = ({ onSessionExpired }) => {
     }
   }, [projects, selectedDate, getWorkHoursForProjectAndDate, maxHours]);
 
-  // Animate segment filling when hours change
-  const animateSegmentFill = useCallback((projectId, fromHours, toHours) => {
-    if (fromHours === toHours) return;
-    
-    const duration = 150; // Reduced duration for smoother animation
-    const startTime = Date.now();
-    
-    const animate = () => {
-      const elapsed = Date.now() - startTime;
-      const progress = Math.min(elapsed / duration, 1);
-      
-      // Easing function for smooth animation
-      const easeOutQuart = 1 - Math.pow(1 - progress, 4);
-      
-      const currentHours = fromHours + (toHours - fromHours) * easeOutQuart;
-      
-      // STRICT: Immediately set small values to 0
-      const cleanedHours = currentHours < 0.5 ? 0 : currentHours;
-      
-      // Update hours temporarily for animation
-      setHoursPerProject(prev => ({
-        ...prev,
-        [projectId]: cleanedHours
-      }));
-      
-      if (progress < 1) {
-        requestAnimationFrame(animate);
-      } else {
-        // Ensure final value is exact and cleaned
-        const finalCleanedHours = toHours < 0.5 ? 0 : toHours;
-        setHoursPerProject(prev => ({
-          ...prev,
-          [projectId]: finalCleanedHours
-        }));
-      }
-    };
-    
-    requestAnimationFrame(animate);
-  }, []);
+  const updateHoursFromPosition = useCallback((projectId, event, target) => {
+    if (!target) return;
 
-  // Draw circle function
-  const drawCircle = useCallback(() => {
-    const ctx = ctxRef.current;
-    const canvas = canvasRef.current;
-    if (!ctx || !canvas) return;
+    const rect = target.getBoundingClientRect();
+    const clientX = event.touches?.[0]?.clientX ?? event.clientX;
+    const ratio = Math.min(Math.max((clientX - rect.left) / rect.width, 0), 1);
 
-    // Clear only the circle area instead of entire canvas to prevent flickering
-    const centerX = centerXRef.current;
-    const centerY = centerYRef.current;
-    const radius = radiusRef.current;
-    
-    // Clear only the circular area with a slightly larger radius to ensure clean edges
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(centerX, centerY, radius + 10, 0, Math.PI * 2);
-    ctx.clip();
-    ctx.clearRect(centerX - radius - 10, centerY - radius - 10, (radius + 10) * 2, (radius + 10) * 2);
-    ctx.restore();
-    
-    // Draw base circle
-    ctx.beginPath();
-    ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
-    ctx.strokeStyle = '#dfe6e9';
-    ctx.lineWidth = BASE_STROKE;
-    ctx.lineCap = 'round';
-    ctx.stroke();
+    const desiredHours = Math.max(0, Math.min(maxHours, ratio * maxHours));
+    const currentProjectHours = hoursPerProject[projectId] || 0;
+    const otherTotal = Object.entries(hoursPerProject).reduce((sum, [id, hours]) => {
+      if (Number(id) === Number(projectId)) return sum;
+      return sum + Math.max(0, hours || 0);
+    }, 0);
 
-    // Draw project segments with animation
-    const ordered = [...projects].sort((a, b) => a.id - b.id);
-    let start = -Math.PI / 2;
-    
-    ordered.forEach(p => {
-      const hrs = hoursPerProject[p.id] || 0;
-      
-      // STRICT: Only draw segments with hours > 0
-      if (hrs <= 0) {
-        return; // Skip this project entirely
-      }
-      
-      const ang = (hrs / maxHours) * 2 * Math.PI;
-      
-      // Special handling for single project filling entire circle
-      let finalAngle = ang;
-      if (hrs >= maxHours) {
-        // Leave a tiny gap to prevent full circle issues
-        finalAngle = 2 * Math.PI - 0.01;
-      }
-      
-      // Create gradient for smooth color transition
-      const gradient = ctx.createLinearGradient(
-        centerX + Math.cos(start) * radius,
-        centerY + Math.sin(start) * radius,
-        centerX + Math.cos(start + finalAngle) * radius,
-        centerY + Math.sin(start + finalAngle) * radius
-      );
-      
-      // Add multiple color stops for smooth transition
-      gradient.addColorStop(0, p.color);
-      gradient.addColorStop(0.5, p.color + 'CC'); // Slightly transparent
-      gradient.addColorStop(1, p.color);
-      
-      ctx.beginPath();
-      ctx.arc(centerX, centerY, radius, start, start + finalAngle);
-      ctx.strokeStyle = gradient;
-      ctx.lineWidth = SEGMENT_STROKE;
-      ctx.lineCap = 'round';
-      
-      // Add shadow for depth
-      ctx.shadowColor = p.color + '40';
-      ctx.shadowBlur = 8;
-      ctx.shadowOffsetX = 2;
-      ctx.shadowOffsetY = 2;
-      
-      ctx.stroke();
-      
-      // Reset shadow
-      ctx.shadowColor = 'transparent';
-      ctx.shadowBlur = 0;
-      ctx.shadowOffsetX = 0;
-      ctx.shadowOffsetY = 0;
-      
-      start += finalAngle;
-    });
-  }, [hoursPerProject, projects, maxHours]);
+    const maxForProject = Math.max(0, maxHours - otherTotal);
+    const finalHours = Math.min(desiredHours, maxForProject);
 
-  // Initialize canvas
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    setHoursPerProject(prev => ({
+      ...prev,
+      [projectId]: parseFloat(finalHours.toFixed(1))
+    }));
 
-    const ctx = canvas.getContext('2d');
-    ctxRef.current = ctx;
+    setActiveId(projectId);
+  }, [hoursPerProject, maxHours]);
 
-    const resizeCanvas = () => {
-      canvas.width = canvas.offsetWidth;
-      canvas.height = canvas.offsetHeight;
-      const maxStroke = Math.max(BASE_STROKE, SEGMENT_STROKE);
-      centerXRef.current = canvas.width / 2;
-      centerYRef.current = canvas.height / 2;
-      radiusRef.current = Math.max(10, canvas.width / 2 - (maxStroke / 2) - 6);
-      drawCircle();
-    };
+  const handleRowPointerDown = useCallback((projectId, event) => {
+    setDraggingProjectId(projectId);
+    updateHoursFromPosition(projectId, event, event.currentTarget);
+  }, [updateHoursFromPosition]);
 
-    resizeCanvas();
-    window.addEventListener('resize', resizeCanvas);
+  const handleRowPointerMove = useCallback((projectId, event) => {
+    if (!draggingProjectId || draggingProjectId !== projectId) return;
+    if (event.buttons === 0 && !event.touches) return;
 
-    return () => window.removeEventListener('resize', resizeCanvas);
-  }, [drawCircle]);
+    updateHoursFromPosition(projectId, event, event.currentTarget);
+  }, [draggingProjectId, updateHoursFromPosition]);
 
-  // Force cleanup of very small values
-  useEffect(() => {
-    const forceCleanup = () => {
-      const cleanedHours = {};
-      let hasChanges = false;
-      
-      Object.entries(hoursPerProject).forEach(([projectId, hours]) => {
-        if (hours < 0.5 && hours > 0) {
-          cleanedHours[projectId] = 0;
-          hasChanges = true;
-        }
-      });
-      
-      if (hasChanges) {
-        setHoursPerProject(prev => ({
-          ...prev,
-          ...cleanedHours
-        }));
-      }
-    };
-    
-    // Run cleanup immediately
-    forceCleanup();
-    
-    // Also run cleanup after a short delay to catch any missed values
-    const timeoutId = setTimeout(forceCleanup, 100);
-    
-    return () => clearTimeout(timeoutId);
-  }, [hoursPerProject]);
-
-  // Throttled draw function to prevent excessive redraws
-  const throttledDrawCircle = useCallback(() => {
-    if (drawTimeoutRef.current) {
-      clearTimeout(drawTimeoutRef.current);
-    }
-    
-    drawTimeoutRef.current = setTimeout(() => {
-      drawCircle();
-      drawTimeoutRef.current = null;
-    }, 16); // ~60fps
-  }, [drawCircle]);
-
-  // Update canvas when hours change with throttling
-  useEffect(() => {
-    throttledDrawCircle();
-  }, [hoursPerProject, throttledDrawCircle]);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (drawTimeoutRef.current) {
-        clearTimeout(drawTimeoutRef.current);
-      }
-    };
-  }, []);
-
-  // Get angle from mouse/touch event
-  const getAngleFromEvent = useCallback((e) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return 0;
-    
-    const rect = canvas.getBoundingClientRect();
-    const x = (e.clientX || e.touches[0].clientX) - rect.left - rect.width / 2;
-    const y = (e.clientY || e.touches[0].clientY) - rect.top - rect.height / 2;
-    
-    // Ensure we have valid coordinates
-    if (Math.abs(x) < 0.1 && Math.abs(y) < 0.1) return 0;
-    
-    return Math.atan2(y, x);
-  }, []);
-
-  // Handle drag start
-  const handleDragStart = useCallback((e) => {
-    e.preventDefault();
-    setDragging(true);
-    setStartDragAngle(getAngleFromEvent(e));
-    setHintHidden(true); // Hide hint on drag start
-  }, [getAngleFromEvent]);
-
-  const handleMove = useCallback((e) => {
-    if (!dragging || !activeId) return;
-    
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    
-    const rect = canvas.getBoundingClientRect();
-    const x = (e.clientX || e.touches[0].clientX) - rect.left - rect.width / 2;
-    const y = (e.clientY || e.touches[0].clientY) - rect.top - rect.height / 2;
-    
-    const angle = Math.atan2(y, x);
-    
-    // Improved angle normalization to handle full rotations
-    let deltaAngle = angle - startDragAngle;
-    
-    // Normalize delta angle to be within -π to π
-    while (deltaAngle > Math.PI) {
-      deltaAngle -= 2 * Math.PI;
-    }
-    while (deltaAngle < -Math.PI) {
-      deltaAngle += 2 * Math.PI;
-    }
-    
-    if (Math.abs(deltaAngle) > 0.05) {
-      // Convert angle to hours: positive delta = increase, negative = decrease
-      const hoursToAdd = Math.round(deltaAngle / (Math.PI / 4)) * 0.5;
-      
-      if (hoursToAdd !== 0) {
-        const currentProjectHours = hoursPerProject[activeId] || 0;
-        const newProjectHours = currentProjectHours + hoursToAdd;
-        
-        // Don't allow negative hours for individual projects
-        if (newProjectHours < 0) {
-          return;
-        }
-        
-        // If decreasing hours, just do it immediately
-        if (hoursToAdd < 0) {
-          const newHours = Math.max(0, newProjectHours);
-          // STRICT: If hours are very small, set to 0 immediately
-          const finalHours = newHours < 0.5 ? 0 : newHours;
-          animateSegmentFill(activeId, currentProjectHours, finalHours);
-          setStartDragAngle(angle);
-          return;
-        }
-        
-        // If increasing hours, check total limit
-        const currentTotal = Object.values(hoursPerProject).reduce((sum, h) => sum + (h || 0), 0);
-        const wouldExceedLimit = currentTotal - currentProjectHours + newProjectHours > maxHours;
-        
-        if (wouldExceedLimit) {
-          // Calculate max allowed hours
-          const maxAllowedHours = maxHours - (currentTotal - currentProjectHours);
-          const actualHoursToAdd = Math.max(0, Math.min(hoursToAdd, maxAllowedHours - currentProjectHours));
-          
-          if (actualHoursToAdd > 0) {
-            const finalHours = Math.max(0, currentProjectHours + actualHoursToAdd);
-            animateSegmentFill(activeId, currentProjectHours, finalHours);
-          }
-        } else {
-          const finalHours = Math.max(0, newProjectHours);
-          // Special handling: ensure we don't exceed maxHours for single project
-          const clampedFinalHours = Math.min(finalHours, maxHours);
-          animateSegmentFill(activeId, currentProjectHours, clampedFinalHours);
-        }
-        
-        setStartDragAngle(angle);
-      }
-    }
-  }, [dragging, activeId, startDragAngle, hoursPerProject, maxHours, animateSegmentFill]);
-
-  const handleEnd = useCallback(() => {
-    setDragging(false);
-    setHintHidden(false); // Show hint on drag end
+  const handleRowPointerEnd = useCallback(() => {
+    setDraggingProjectId(null);
   }, []);
 
   const handleSubmit = useCallback(async () => {
@@ -610,27 +334,17 @@ const TimeLogger = ({ onSessionExpired }) => {
     prevHoursRef.current = { ...hoursPerProject };
   }, [hoursPerProject, isSubmitted]);
 
-  // Add event listeners
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    const stopDragging = () => setDraggingProjectId(null);
 
-    canvas.addEventListener('mousedown', handleDragStart);
-    window.addEventListener('mousemove', handleMove);
-    window.addEventListener('mouseup', handleEnd);
-    canvas.addEventListener('touchstart', handleDragStart, { passive: false });
-    window.addEventListener('touchmove', handleMove, { passive: false });
-    window.addEventListener('touchend', handleEnd);
+    window.addEventListener('mouseup', stopDragging);
+    window.addEventListener('touchend', stopDragging);
 
     return () => {
-      canvas.removeEventListener('mousedown', handleDragStart);
-      window.removeEventListener('mousemove', handleMove);
-      window.removeEventListener('mouseup', handleEnd);
-      canvas.removeEventListener('touchstart', handleDragStart);
-      window.removeEventListener('touchmove', handleMove);
-      window.removeEventListener('touchend', handleEnd);
+      window.removeEventListener('mouseup', stopDragging);
+      window.removeEventListener('touchend', stopDragging);
     };
-  }, [handleDragStart, handleMove, handleEnd]);
+  }, []);
 
   // Initialize Telegram WebApp
   useEffect(() => {
@@ -701,53 +415,38 @@ const TimeLogger = ({ onSessionExpired }) => {
             </span>
           </div>
           <div className="summary-list">
-            {projects.map(p => (
-              <div
-                key={p.id}
-                className={`row ${activeId === p.id ? 'active' : ''}`}
-                onClick={() => setActiveId(p.id)}
-              >
-                <div className="dot" style={{ backgroundColor: p.color }}></div>
-                <div className="name">{p.name}</div>
-                <div className="hrs">
-                  <span className="hours">{Math.round(hoursPerProject[p.id] || 0)}</span>
-                  <span className="unit">ч</span>
+            {projects.map(p => {
+              const filledPercent = Math.min(100, Math.max(0, ((hoursPerProject[p.id] || 0) / maxHours) * 100));
+              return (
+                <div
+                  key={p.id}
+                  className={`project-rect ${activeId === p.id ? 'active' : ''}`}
+                  onMouseDown={(e) => handleRowPointerDown(p.id, e)}
+                  onMouseMove={(e) => handleRowPointerMove(p.id, e)}
+                  onMouseUp={handleRowPointerEnd}
+                  onTouchStart={(e) => handleRowPointerDown(p.id, e)}
+                  onTouchMove={(e) => handleRowPointerMove(p.id, e)}
+                  onTouchEnd={handleRowPointerEnd}
+                >
+                  <div className="project-fill" style={{ width: `${filledPercent}%`, backgroundColor: p.color }} />
+                  <div className="project-content">
+                    <div className="project-name">{p.name}</div>
+                    <div className="project-hours">
+                      {parseFloat((hoursPerProject[p.id] || 0).toFixed(1))} ч
+                    </div>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
-          <div className="circle-container">
-            <canvas ref={canvasRef} />
-            <div 
-              className={`center-button ${isAnimating ? 'bounce' : ''} ${isSubmitted ? 'submitted' : ''}`}
-              onClick={handleSubmit}
-              title={isSubmitted ? "Часы залогированы!" : "Внести часы"}
-            >
-              {isSubmitted ? (
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M20 6L9 17l-5-5" stroke="#ffffff" />
-                </svg>
-              ) : (
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 5v14M5 12h14" stroke="#ffffff" />
-                </svg>
-              )}
-            </div>
-            
-            {/* Hours indicator inside circle under button */}
-            <div className="hours-indicator">
-              {Math.round(hoursPerProject[activeId] || 0)} ч
-            </div>
-          </div>
-          
-          {/* Drag hint for users */}
-          <div className={`drag-hint ${hintHidden ? 'hidden' : ''}`}>
-            <div className="hint-text">Водите пальцем по или против часовой стрелки</div>
-            <div className="hint-arrows">
-              <div className="arrow arrow-left">↻</div>
-              <div className="arrow arrow-right">↺</div>
-            </div>
-          </div>
+
+          <button
+            className={`log-button ${isAnimating ? 'bounce' : ''} ${isSubmitted ? 'submitted' : ''}`}
+            onClick={handleSubmit}
+            title={isSubmitted ? "Часы залогированы!" : "Внести часы"}
+          >
+            {isSubmitted ? 'Залогировано' : 'Внести часы'}
+          </button>
         </>
       )}
 
