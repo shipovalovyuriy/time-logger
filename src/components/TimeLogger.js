@@ -4,7 +4,7 @@ import 'react-datepicker/dist/react-datepicker.css';
 import storage from '../utils/storage';
 import './TimeLogger.css';
 
-const TimeLogger = () => {
+const TimeLogger = ({ onSessionExpired }) => {
   const [projects, setProjects] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -78,6 +78,7 @@ const TimeLogger = () => {
       if (!authToken) {
         console.error('TimeLogger: No auth token found in localStorage');
         setError('Токен авторизации не найден. Пожалуйста, войдите в систему.');
+        onSessionExpired?.();
         return;
       }
 
@@ -108,6 +109,7 @@ const TimeLogger = () => {
         console.error('TimeLogger: Authentication failed, clearing token');
         storage.removeItem('token');
         setError('Сессия истекла. Пожалуйста, войдите в систему снова.');
+        onSessionExpired?.();
         return;
       }
 
@@ -164,7 +166,7 @@ const TimeLogger = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [selectedDate]);
+  }, [onSessionExpired, selectedDate]);
 
   // Load projects on component mount
   useEffect(() => {
