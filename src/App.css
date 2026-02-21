@@ -1,74 +1,55 @@
 .App {
-  text-align: center;
-  min-height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
-  color: white;
-  font-family: 'Segoe UI', sans-serif;
-  padding: 20px;
   position: relative;
-  overflow: hidden;
+  min-height: var(--tg-viewport-height, 100vh);
+  background: var(--tg-bg-color, #0f172a);
+  color: var(--tg-text-color, #ffffff);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  padding-top: calc(env(safe-area-inset-top, 0px) + 12px);
+  padding-right: calc(env(safe-area-inset-right, 0px) + 12px);
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+  padding-left: calc(env(safe-area-inset-left, 0px) + 12px);
+  box-sizing: border-box;
 }
 
-/* Add animated gradient overlay for extra beauty */
-.App::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: linear-gradient(45deg, 
-    rgba(102, 126, 234, 0.8) 0%, 
-    rgba(118, 75, 162, 0.8) 25%, 
-    rgba(240, 147, 251, 0.8) 50%, 
-    rgba(245, 101, 101, 0.8) 75%, 
-    rgba(254, 218, 119, 0.8) 100%);
-  background-size: 400% 400%;
-  animation: gradientShift 15s ease infinite;
-  z-index: -1;
+.App.telegram-app {
+  overscroll-behavior: none;
+  touch-action: manipulation;
 }
 
-@keyframes gradientShift {
-  0% {
-    background-position: 0% 50%;
-  }
-  50% {
-    background-position: 100% 50%;
-  }
-  100% {
-    background-position: 0% 50%;
-  }
-}
-
-/* Logout button styles */
 .logout-button {
   position: absolute;
-  top: 20px;
-  right: 20px;
+  top: calc(env(safe-area-inset-top, 0px) + 10px);
+  right: calc(env(safe-area-inset-right, 0px) + 10px);
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.15);
-  backdrop-filter: blur(15px);
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  border-radius: 50%;
-  width: 45px;
-  height: 45px;
-  color: white;
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.26);
+  background: var(--tg-secondary-bg-color, #17233a);
+  color: var(--tg-text-color, #ffffff);
   cursor: pointer;
-  transition: all 0.3s ease;
-  z-index: 10;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-}
-
-.logout-button:hover {
-  background: rgba(255, 255, 255, 0.25);
-  transform: translateY(-2px) scale(1.05);
-  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+  z-index: 4;
 }
 
 .logout-button svg {
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   stroke: currentColor;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .logout-button:hover {
+    opacity: 0.9;
+  }
+}
+
+@media (max-width: 560px) {
+  .App {
+    padding-top: calc(env(safe-area-inset-top, 0px) + 10px);
+    padding-right: calc(env(safe-area-inset-right, 0px) + 10px);
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 10px);
+    padding-left: calc(env(safe-area-inset-left, 0px) + 10px);
+  }
 }

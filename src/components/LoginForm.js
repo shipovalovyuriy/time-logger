@@ -140,7 +140,7 @@ const LoginForm = ({ onLoginSuccess }) => {
             disabled={isLoading}
           >
             {isLoading ? (
-              <div className="spinner"></div>
+              <div className="login-spinner"></div>
             ) : (
               'Войти'
             )}
