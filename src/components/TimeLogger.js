@@ -814,6 +814,7 @@ const TimeLogger = () => {
   const loadRequestRef = useRef(0);
   const previousWeekKeyRef = useRef(null);
   const rewardTimerRef = useRef(null);
+  const closeAfterSubmitTimerRef = useRef(null);
   const previousTotalsRef = useRef({
     project: 0,
     activity: 0
@@ -965,6 +966,16 @@ const TimeLogger = () => {
       }
     };
   }, [rewardScope]);
+
+  useEffect(
+    () => () => {
+      if (closeAfterSubmitTimerRef.current) {
+        window.clearTimeout(closeAfterSubmitTimerRef.current);
+        closeAfterSubmitTimerRef.current = null;
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     const stopPainting = () => {
@@ -1477,6 +1488,16 @@ const TimeLogger = () => {
       setInitialProjectPercentById({ ...projectPercentById });
       setInitialActivityPercentByCode({ ...activityPercentByCode });
       setIsSubmitted(true);
+
+      if (window.Telegram?.WebApp) {
+        if (closeAfterSubmitTimerRef.current) {
+          window.clearTimeout(closeAfterSubmitTimerRef.current);
+        }
+        closeAfterSubmitTimerRef.current = window.setTimeout(() => {
+          window.Telegram?.WebApp?.close?.();
+          closeAfterSubmitTimerRef.current = null;
+        }, 420);
+      }
     } catch (submitError) {
       setError(submitError.message || 'Ошибка сохранения weekly распределения');
       setIsSubmitted(false);
@@ -1538,18 +1559,28 @@ const TimeLogger = () => {
           is_active: canProceed,
           is_visible: true
         });
+        if (canProceed) {
+          mainButton.enable?.();
+        } else {
+          mainButton.disable?.();
+        }
         mainButton.show();
         backButton.hide();
         return;
       }
 
-      const canSave = !isSaving && isPeriodComplete && projects.length > 0;
+      const canSave = !isSaving && !isLoading && !error && isPeriodComplete && projects.length > 0;
       mainButton.setParams({
         ...baseParams,
         text: isSaving ? 'Сохраняем...' : isSubmitted ? 'Сохранено' : 'Сохранить',
         is_active: canSave,
         is_visible: true
       });
+      if (canSave) {
+        mainButton.enable?.();
+      } else {
+        mainButton.disable?.();
+      }
       mainButton.show();
       backButton.show();
     };
@@ -1564,7 +1595,9 @@ const TimeLogger = () => {
     };
   }, [
     canGoToStep2,
+    error,
     handleSubmit,
+    isLoading,
     isPeriodComplete,
     isSaving,
     isSubmitted,
@@ -1779,11 +1812,6 @@ const TimeLogger = () => {
             </div>
           )}
 
-          {isTelegramWebApp && (
-            <div className="telegram-actions-hint">
-              Управление шагами и сохранением через кнопки Telegram внизу.
-            </div>
-          )}
       </section>
     </div>
   );
