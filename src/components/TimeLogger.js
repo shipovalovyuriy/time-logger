@@ -805,7 +805,6 @@ const TimeLogger = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState(null);
   const [isSubmitted, setIsSubmitted] = useState(false);
-  const [showLimitHint, setShowLimitHint] = useState(false);
   const [memberId, setMemberId] = useState(() => toPositiveInt(storage.getItem('userId')));
   const [rewardScope, setRewardScope] = useState(null);
 
@@ -906,14 +905,6 @@ const TimeLogger = () => {
       setActiveDate(todayStart);
     }
   }, [activeDate, todayStart]);
-
-  useEffect(() => {
-    if (!showLimitHint) {
-      return undefined;
-    }
-    const timerId = window.setTimeout(() => setShowLimitHint(false), 1400);
-    return () => window.clearTimeout(timerId);
-  }, [showLimitHint]);
 
   useEffect(() => {
     const previousTotals = previousTotalsRef.current;
@@ -1208,7 +1199,6 @@ const TimeLogger = () => {
         }, 0);
 
         if (snapped > current && totalWithoutCurrent + snapped > MAX_TOTAL_PERCENT) {
-          setShowLimitHint(true);
           return prev;
         }
 
@@ -1546,41 +1536,56 @@ const TimeLogger = () => {
       const mainButton = telegramWebApp.MainButton;
       const backButton = telegramWebApp.BackButton;
       const themeParams = telegramWebApp.themeParams || {};
-      const baseParams = {
-        color: themeParams.button_color,
-        text_color: themeParams.button_text_color
+      const isLightTheme =
+        (telegramWebApp.colorScheme ||
+          document.documentElement.dataset.tgColorScheme ||
+          'light') === 'light';
+      const activeButtonParams = {
+        color: themeParams.button_color || '#2ea6ff',
+        text_color: themeParams.button_text_color || '#ffffff'
       };
+      const disabledButtonParams = isLightTheme
+        ? {
+            color: '#d3d8e1',
+            text_color: '#7a8493'
+          }
+        : {
+            color: '#4b5563',
+            text_color: '#d1d5db'
+          };
 
-      if (step === 1) {
-        const canProceed = canGoToStep2;
+      const resolveButtonPalette = (isEnabled) => ({
+        ...(isEnabled ? activeButtonParams : disabledButtonParams),
+        is_active: isEnabled,
+        is_visible: true
+      });
+
+      const applyMainButtonState = (isEnabled, text) => {
         mainButton.setParams({
-          ...baseParams,
-          text: 'К шагу 2',
-          is_active: canProceed,
-          is_visible: true
+          ...resolveButtonPalette(isEnabled),
+          text
         });
-        if (canProceed) {
+
+        if (isEnabled) {
           mainButton.enable?.();
         } else {
           mainButton.disable?.();
         }
+      };
+
+      if (step === 1) {
+        const canProceed = canGoToStep2;
+        applyMainButtonState(canProceed, 'К шагу 2');
         mainButton.show();
         backButton.hide();
         return;
       }
 
       const canSave = !isSaving && !isLoading && !error && isPeriodComplete && projects.length > 0;
-      mainButton.setParams({
-        ...baseParams,
-        text: isSaving ? 'Сохраняем...' : isSubmitted ? 'Сохранено' : 'Сохранить',
-        is_active: canSave,
-        is_visible: true
-      });
-      if (canSave) {
-        mainButton.enable?.();
-      } else {
-        mainButton.disable?.();
-      }
+      applyMainButtonState(
+        canSave,
+        isSaving ? 'Сохраняем...' : isSubmitted ? 'Сохранено' : 'Сохранить'
+      );
       mainButton.show();
       backButton.show();
     };
@@ -1613,8 +1618,8 @@ const TimeLogger = () => {
   const isCurrentRewardActive = rewardScope === currentScope;
   const baseStepHint =
     step === 1
-      ? 'Шаг 1. Распределите фокус по инициативам на выбранный отрезок.'
-      : 'Шаг 2. Распределите те же 100% по активностям.';
+      ? 'Шаг 1. Проведи пальцем по полосе инициативы, чтобы закрасить процент. Двойной тап по полосе — максимум.'
+      : 'Шаг 2. Так же проведи пальцем по полосе активности. Двойной тап по полосе — максимум.';
 
   let infoText = baseStepHint;
   let infoTone = 'neutral';
@@ -1630,9 +1635,6 @@ const TimeLogger = () => {
   } else if (isLoading) {
     infoText = 'Загружаем данные отрезков...';
     infoTone = 'info';
-  } else if (showLimitHint) {
-    infoText = 'Нельзя закрасить больше 100% в текущем шаге';
-    infoTone = 'warning';
   } else if (isSubmitted) {
     infoText = 'Отрезок успешно сохранен';
     infoTone = 'success';
