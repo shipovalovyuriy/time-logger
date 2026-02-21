@@ -50,16 +50,48 @@ function App() {
 
     const applyTheme = () => {
       const theme = tg.themeParams || {};
+      const colorScheme = tg.colorScheme || 'light';
+      const isLight = colorScheme === 'light';
+      const defaults = isLight
+        ? {
+            bgColor: '#f3f6fb',
+            secondaryBgColor: '#ffffff',
+            textColor: '#0f172a',
+            hintColor: '#5f6b7c',
+            linkColor: '#0a84ff',
+            buttonColor: '#2ea6ff',
+            buttonTextColor: '#ffffff',
+            destructiveColor: '#d83b3b'
+          }
+        : {
+            bgColor: '#0f172a',
+            secondaryBgColor: '#17233a',
+            textColor: '#ffffff',
+            hintColor: '#b6c2d9',
+            linkColor: '#5ac8fa',
+            buttonColor: '#2ea6ff',
+            buttonTextColor: '#ffffff',
+            destructiveColor: '#ff6b6b'
+          };
 
-      root.style.setProperty('--tg-bg-color', theme.bg_color || '#0f172a');
-      root.style.setProperty('--tg-secondary-bg-color', theme.secondary_bg_color || '#17233a');
-      root.style.setProperty('--tg-text-color', theme.text_color || '#ffffff');
-      root.style.setProperty('--tg-hint-color', theme.hint_color || '#b6c2d9');
-      root.style.setProperty('--tg-link-color', theme.link_color || '#5ac8fa');
-      root.style.setProperty('--tg-button-color', theme.button_color || '#2ea6ff');
-      root.style.setProperty('--tg-button-text-color', theme.button_text_color || '#ffffff');
-      root.style.setProperty('--tg-destructive-color', theme.destructive_text_color || '#ff6b6b');
-      root.dataset.tgColorScheme = tg.colorScheme || 'light';
+      root.style.setProperty('--tg-bg-color', theme.bg_color || defaults.bgColor);
+      root.style.setProperty(
+        '--tg-secondary-bg-color',
+        theme.secondary_bg_color || defaults.secondaryBgColor
+      );
+      root.style.setProperty('--tg-text-color', theme.text_color || defaults.textColor);
+      root.style.setProperty('--tg-hint-color', theme.hint_color || defaults.hintColor);
+      root.style.setProperty('--tg-link-color', theme.link_color || defaults.linkColor);
+      root.style.setProperty('--tg-button-color', theme.button_color || defaults.buttonColor);
+      root.style.setProperty(
+        '--tg-button-text-color',
+        theme.button_text_color || defaults.buttonTextColor
+      );
+      root.style.setProperty(
+        '--tg-destructive-color',
+        theme.destructive_text_color || defaults.destructiveColor
+      );
+      root.dataset.tgColorScheme = colorScheme;
     };
 
     const applyViewport = () => {

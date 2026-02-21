@@ -46,7 +46,7 @@
 
 .stepper__node.active {
   background: transparent;
-  color: var(--tg-button-text-color, #ffffff);
+  color: var(--tg-text-color, #ffffff);
 }
 
 .stepper__node.done {
@@ -107,7 +107,7 @@
 .segment-chip.active {
   border-color: rgba(46, 166, 255, 0.65);
   background: rgba(46, 166, 255, 0.2);
-  color: var(--tg-button-text-color, #ffffff);
+  color: var(--tg-text-color, #ffffff);
 }
 
 .segment-chip.done {
@@ -234,6 +234,34 @@
   }
 }
 
+html[data-tg-color-scheme='light'] .stepper__node {
+  color: rgba(15, 23, 42, 0.62);
+}
+
+html[data-tg-color-scheme='light'] .stepper__node.active {
+  color: #0f172a;
+}
+
+html[data-tg-color-scheme='light'] .stepper__node.done {
+  color: #1f9d63;
+}
+
+html[data-tg-color-scheme='light'] .stepper__line {
+  background: rgba(15, 23, 42, 0.22);
+}
+
+html[data-tg-color-scheme='light'] .segment-chip {
+  border-color: rgba(15, 23, 42, 0.18);
+  background: rgba(15, 23, 42, 0.04);
+  color: rgba(15, 23, 42, 0.68);
+}
+
+html[data-tg-color-scheme='light'] .segment-chip.active {
+  border-color: rgba(46, 166, 255, 0.62);
+  background: rgba(46, 166, 255, 0.28);
+  color: #0f172a;
+}
+
 .step-description {
   color: var(--tg-hint-color, #b6c2d9);
   font-size: 12px;
@@ -309,6 +337,9 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   padding-right: 2px;
 }
 
@@ -386,7 +417,7 @@
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.28);
   background: rgba(255, 255, 255, 0.12);
-  touch-action: none;
+  touch-action: pan-y;
   user-select: none;
   cursor: ew-resize;
 }

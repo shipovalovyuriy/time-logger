@@ -984,10 +984,21 @@ const TimeLogger = () => {
   }, []);
 
   useEffect(() => {
-    if (window.Telegram?.WebApp) {
-      window.Telegram.WebApp.expand();
+    if (!telegramWebApp) {
+      return undefined;
     }
-  }, []);
+
+    telegramWebApp.expand();
+    if (isSubmitted) {
+      telegramWebApp.enableVerticalSwipes?.();
+    } else {
+      telegramWebApp.disableVerticalSwipes?.();
+    }
+
+    return () => {
+      telegramWebApp.enableVerticalSwipes?.();
+    };
+  }, [isSubmitted, telegramWebApp]);
 
   useEffect(() => {
     if (!telegramWebApp) {
@@ -1261,7 +1272,9 @@ const TimeLogger = () => {
 
   const handleTrackPointerDown = useCallback(
     (scope, key, event) => {
-      event.preventDefault();
+      if (event.pointerType === 'mouse') {
+        event.preventDefault();
+      }
 
       const rowKey = `${scope}:${String(key)}`;
       const now = Date.now();
@@ -1288,10 +1301,12 @@ const TimeLogger = () => {
       paintRef.current.key = String(key);
       paintRef.current.pointerId = event.pointerId;
 
-      try {
-        event.currentTarget?.setPointerCapture?.(event.pointerId);
-      } catch {
-        /* noop */
+      if (event.pointerType === 'mouse') {
+        try {
+          event.currentTarget?.setPointerCapture?.(event.pointerId);
+        } catch {
+          /* noop */
+        }
       }
 
       updatePercentValue(scope, key, nextPercent);
@@ -1519,7 +1534,7 @@ const TimeLogger = () => {
         const canProceed = canGoToStep2;
         mainButton.setParams({
           ...baseParams,
-          text: canProceed ? 'К шагу 2' : `Инициативы: ${projectTotalPercent}%`,
+          text: 'К шагу 2',
           is_active: canProceed,
           is_visible: true
         });
@@ -1531,7 +1546,7 @@ const TimeLogger = () => {
       const canSave = !isSaving && isPeriodComplete && projects.length > 0;
       mainButton.setParams({
         ...baseParams,
-        text: isSaving ? 'Сохраняем...' : isSubmitted ? 'Сохранено' : 'Сохранить отрезок',
+        text: isSaving ? 'Сохраняем...' : isSubmitted ? 'Сохранено' : 'Сохранить',
         is_active: canSave,
         is_visible: true
       });
@@ -1553,7 +1568,6 @@ const TimeLogger = () => {
     isPeriodComplete,
     isSaving,
     isSubmitted,
-    projectTotalPercent,
     projects.length,
     step,
     telegramWebApp
@@ -1759,7 +1773,7 @@ const TimeLogger = () => {
                   onClick={handleSubmit}
                   disabled={isSaving || !isPeriodComplete || projects.length === 0}
                 >
-                  {isSaving ? 'Сохраняем...' : isSubmitted ? 'Сохранено' : 'Сохранить отрезок'}
+                  {isSaving ? 'Сохраняем...' : isSubmitted ? 'Сохранено' : 'Сохранить'}
                 </button>
               )}
             </div>
