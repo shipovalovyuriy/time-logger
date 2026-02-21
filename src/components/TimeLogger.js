@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import DatePicker from 'react-datepicker';
-import 'react-datepicker/dist/react-datepicker.css';
 import storage from '../utils/storage';
 import './TimeLogger.css';
 
+const API_BASE = 'https://test.newpulse.pkz.icdc.io';
 const MAX_TOTAL_PERCENT = 100;
-const SEGMENTS_COUNT = 10;
 const SEGMENT_STEP = 10;
+const DAY_CAPACITY_HOURS = 8;
+const DOUBLE_TAP_THRESHOLD_MS = 320;
+const REWARD_ANIMATION_MS = 1100;
 
 const PROJECT_COLORS = [
   '#38bdf8',
@@ -21,7 +22,16 @@ const PROJECT_COLORS = [
   '#e879f9'
 ];
 
-const getProjectColor = (projectId) => PROJECT_COLORS[projectId % PROJECT_COLORS.length];
+const DEFAULT_ACTIVITY_TYPES = [
+  { code: 'delivery', name_ru: 'Разработка' },
+  { code: 'meetings_coordination', name_ru: 'Встречи и согласования' },
+  { code: 'support_incidents', name_ru: 'Саппорт и инциденты' },
+  { code: 'improvement_tech_debt', name_ru: 'Улучшения и техдолг' },
+  { code: 'internal_processes', name_ru: 'Внутренние процессы' },
+  { code: 'presales_commercial', name_ru: 'Пресейл и коммерция' },
+  { code: 'research_discovery', name_ru: 'Исследования' },
+  { code: 'blocked_waiting', name_ru: 'Ожидание и блокеры' }
+];
 
 const clampPercent = (value) => {
   if (!Number.isFinite(value)) return 0;
@@ -33,227 +43,935 @@ const snapToSegmentPercent = (value) => {
   return Math.round(normalized / SEGMENT_STEP) * SEGMENT_STEP;
 };
 
-const formatLegacyDate = (date) => `${date.getDate()}.${date.getMonth() + 1}.${date.getFullYear()}`;
+const startOfDay = (date) => {
+  const next = new Date(date);
+  next.setHours(0, 0, 0, 0);
+  return next;
+};
 
-const getMonthBounds = (date) => ({
-  start: new Date(Date.UTC(date.getFullYear(), date.getMonth(), 1, 0, 0, 0)),
-  end: new Date(Date.UTC(date.getFullYear(), date.getMonth() + 1, 0, 0, 0, 0))
-});
+const endOfDay = (date) => {
+  const next = new Date(date);
+  next.setHours(23, 59, 59, 999);
+  return next;
+};
 
-const getMonthKey = (date) => {
+const startOfMonth = (date) =>
+  new Date(date.getFullYear(), date.getMonth(), 1, 0, 0, 0, 0);
+
+const endOfMonth = (date) =>
+  new Date(date.getFullYear(), date.getMonth() + 1, 0, 0, 0, 0, 0);
+
+const addDays = (date, days) =>
+  new Date(date.getFullYear(), date.getMonth(), date.getDate() + days, 0, 0, 0, 0);
+
+const differenceInCalendarDays = (left, right) => {
+  const oneDay = 24 * 60 * 60 * 1000;
+  const normalizedLeft = startOfDay(left).getTime();
+  const normalizedRight = startOfDay(right).getTime();
+  return Math.round((normalizedLeft - normalizedRight) / oneDay);
+};
+
+const isWeekend = (date) => {
+  const day = date.getDay();
+  return day === 0 || day === 6;
+};
+
+const formatLegacyDate = (date) =>
+  `${date.getDate()}.${date.getMonth() + 1}.${date.getFullYear()}`;
+
+const formatDateKey = (date) => {
+  const day = String(date.getDate()).padStart(2, '0');
   const month = String(date.getMonth() + 1).padStart(2, '0');
-  return `${date.getFullYear()}.${month}.01`;
+  return `${date.getFullYear()}-${month}-${day}`;
+};
+
+const formatShortDate = (date) => {
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  return `${day}.${month}`;
+};
+
+const formatSegmentLabel = (start, end) =>
+  `${formatShortDate(start)} - ${formatShortDate(end)}`;
+
+const getSegmentKey = (start, end) => `${formatDateKey(start)}_${formatDateKey(end)}`;
+
+const buildMonthSegments = (monthDate) => {
+  const monthStart = startOfDay(startOfMonth(monthDate));
+  const monthEnd = startOfDay(endOfMonth(monthDate));
+  const totalDays = differenceInCalendarDays(monthEnd, monthStart) + 1;
+
+  return Array.from({ length: 4 }).map((_, index) => {
+    const startOffset = Math.floor((totalDays * index) / 4);
+    const nextOffset = Math.floor((totalDays * (index + 1)) / 4);
+    const segmentStart = addDays(monthStart, startOffset);
+    const segmentEnd = addDays(monthStart, Math.max(startOffset, nextOffset - 1));
+
+    return {
+      id: formatDateKey(segmentStart),
+      index: index + 1,
+      weekStart: segmentStart,
+      weekEnd: segmentEnd,
+      label: formatSegmentLabel(segmentStart, segmentEnd)
+    };
+  });
+};
+
+const resolveActiveSegmentIndex = (segments, activeDate) => {
+  const activeKey = formatDateKey(activeDate);
+
+  const foundIndex = segments.findIndex((segment) => {
+    const startKey = formatDateKey(segment.weekStart);
+    const endKey = formatDateKey(segment.weekEnd);
+    return activeKey >= startKey && activeKey <= endKey;
+  });
+
+  return foundIndex >= 0 ? foundIndex : 0;
+};
+
+const toLocalIso = (date, isEnd = false) => {
+  const normalized = isEnd ? endOfDay(date) : startOfDay(date);
+  const shifted = new Date(normalized.getTime() - normalized.getTimezoneOffset() * 60 * 1000);
+  return shifted.toISOString();
+};
+
+const sumPercentMap = (map) =>
+  Object.values(map).reduce((sum, value) => sum + (Number(value) || 0), 0);
+
+const getProjectColor = (index) => PROJECT_COLORS[index % PROJECT_COLORS.length];
+
+const extractResult = (payload) => {
+  if (payload && typeof payload === 'object' && !Array.isArray(payload) && 'result' in payload) {
+    return payload.result;
+  }
+  return payload;
+};
+
+const getErrorMessageFromPayload = (payload) => {
+  if (!payload || typeof payload !== 'object') return '';
+  return (
+    payload.message ||
+    payload.error ||
+    payload?.data?.message ||
+    payload?.result?.message ||
+    ''
+  );
+};
+
+const requestJson = async (url, options, fallbackMessage) => {
+  const response = await fetch(url, options);
+  const payload = await response.json().catch(() => null);
+
+  if (response.status === 401 || response.status === 403) {
+    storage.removeItem('token');
+    throw new Error('Сессия истекла. Пожалуйста, войдите снова.');
+  }
+
+  if (!response.ok) {
+    const apiMessage = getErrorMessageFromPayload(payload);
+    throw new Error(apiMessage || `${fallbackMessage} (${response.status})`);
+  }
+
+  return payload;
+};
+
+const normalizeProjectPercents = (projects, rawByProjectId) => {
+  const normalized = {};
+
+  projects.forEach((project) => {
+    normalized[project.id] = snapToSegmentPercent(rawByProjectId[project.id] || 0);
+  });
+
+  let total = sumPercentMap(normalized);
+
+  if (total > MAX_TOTAL_PERCENT) {
+    const sortedIds = [...projects]
+      .sort(
+        (left, right) =>
+          (normalized[right.id] || 0) - (normalized[left.id] || 0) ||
+          left.id - right.id
+      )
+      .map((project) => project.id);
+
+    while (total > MAX_TOTAL_PERCENT) {
+      let adjusted = false;
+      for (let index = 0; index < sortedIds.length && total > MAX_TOTAL_PERCENT; index += 1) {
+        const projectId = sortedIds[index];
+        if ((normalized[projectId] || 0) <= 0) {
+          continue;
+        }
+        normalized[projectId] -= SEGMENT_STEP;
+        total -= SEGMENT_STEP;
+        adjusted = true;
+      }
+      if (!adjusted) break;
+    }
+  }
+
+  return normalized;
+};
+
+const buildWorkingDays = (rangeStart, rangeEnd) => {
+  const start = startOfDay(rangeStart);
+  const end = startOfDay(rangeEnd);
+  const days = [];
+  let cursor = start;
+
+  while (cursor.getTime() <= end.getTime()) {
+    if (!isWeekend(cursor)) {
+      days.push({
+        date: new Date(cursor),
+        dayKey: formatDateKey(cursor),
+        capacityHours: DAY_CAPACITY_HOURS
+      });
+    }
+    cursor = addDays(cursor, 1);
+  }
+
+  return days;
+};
+
+const roundByLargestRemainder = (items, targetTotal) => {
+  const roundedTarget = Math.max(0, Math.round(targetTotal));
+  const baseMap = {};
+  let baseTotal = 0;
+
+  const fractions = items.map(({ key, raw }) => {
+    const sanitized = Math.max(0, Number.isFinite(raw) ? raw : 0);
+    const floorValue = Math.floor(sanitized);
+    baseMap[key] = floorValue;
+    baseTotal += floorValue;
+    return {
+      key,
+      fraction: sanitized - floorValue
+    };
+  });
+
+  let remainder = roundedTarget - baseTotal;
+
+  if (remainder > 0) {
+    const positive = [...fractions].sort(
+      (left, right) => right.fraction - left.fraction || left.key - right.key
+    );
+    for (let index = 0; index < positive.length && remainder > 0; index += 1) {
+      baseMap[positive[index].key] += 1;
+      remainder -= 1;
+      if (index === positive.length - 1 && remainder > 0) {
+        index = -1;
+      }
+    }
+  } else if (remainder < 0) {
+    const negative = [...fractions].sort(
+      (left, right) => left.fraction - right.fraction || right.key - left.key
+    );
+    for (let index = 0; index < negative.length && remainder < 0; index += 1) {
+      const itemKey = negative[index].key;
+      if ((baseMap[itemKey] || 0) <= 0) {
+        continue;
+      }
+      baseMap[itemKey] -= 1;
+      remainder += 1;
+      if (index === negative.length - 1 && remainder < 0) {
+        index = -1;
+      }
+    }
+  }
+
+  return baseMap;
+};
+
+const buildProjectHoursFromPercents = (projects, percentByProject, capacityHours) => {
+  const safeCapacity = Math.max(0, Math.round(capacityHours));
+
+  if (safeCapacity <= 0) {
+    return projects.map((project) => ({
+      projectId: project.id,
+      hours: 0
+    }));
+  }
+
+  const rawValues = projects.map((project) => ({
+    key: project.id,
+    raw: (safeCapacity * clampPercent(percentByProject[project.id] || 0)) / MAX_TOTAL_PERCENT
+  }));
+  const targetTotalHours = Math.round(rawValues.reduce((sum, item) => sum + item.raw, 0));
+  const roundedHoursByProject = roundByLargestRemainder(rawValues, targetTotalHours);
+
+  return projects.map((project) => ({
+    projectId: project.id,
+    hours: Math.max(0, roundedHoursByProject[project.id] || 0)
+  }));
+};
+
+const distributeHoursAcrossDays = (projectHours, workingDays) => {
+  const dayRemaining = workingDays.map((day) => day.capacityHours);
+  const result = {};
+
+  const queue = [...projectHours]
+    .map((item) => ({ ...item, hours: Math.max(0, Math.round(item.hours)) }))
+    .sort((left, right) => right.hours - left.hours || left.projectId - right.projectId);
+
+  queue.forEach((project) => {
+    const byDay = {};
+    workingDays.forEach((day) => {
+      byDay[day.dayKey] = 0;
+    });
+
+    for (let hour = 0; hour < project.hours; hour += 1) {
+      let bestDayIndex = -1;
+      let bestRemaining = -1;
+
+      for (let index = 0; index < workingDays.length; index += 1) {
+        if (dayRemaining[index] > bestRemaining) {
+          bestRemaining = dayRemaining[index];
+          bestDayIndex = index;
+        }
+      }
+
+      if (bestDayIndex < 0 || bestRemaining <= 0) {
+        break;
+      }
+
+      const dayKey = workingDays[bestDayIndex].dayKey;
+      byDay[dayKey] += 1;
+      dayRemaining[bestDayIndex] -= 1;
+    }
+
+    result[project.projectId] = byDay;
+  });
+
+  return result;
+};
+
+const buildProjectFactsPayload = (memberId, projects, percentByProject, rangeStart, rangeEnd) => {
+  const workingDays = buildWorkingDays(rangeStart, rangeEnd);
+  const totalCapacity = workingDays.reduce((sum, day) => sum + day.capacityHours, 0);
+  const projectHours = buildProjectHoursFromPercents(projects, percentByProject, totalCapacity);
+  const distributed = distributeHoursAcrossDays(projectHours, workingDays);
+  const items = [];
+
+  projects.forEach((project) => {
+    workingDays.forEach((day) => {
+      items.push({
+        member_id: memberId,
+        project_id: project.id,
+        work_day: day.dayKey,
+        work_hour: Math.max(0, distributed[project.id]?.[day.dayKey] || 0)
+      });
+    });
+  });
+
+  return items;
+};
+
+const buildProjectPrefill = (projects, rangeRows, rangeStart, rangeEnd) => {
+  const workingDays = buildWorkingDays(rangeStart, rangeEnd);
+  const totalCapacity = workingDays.reduce((sum, day) => sum + day.capacityHours, 0);
+  const startKey = formatDateKey(rangeStart);
+  const endKey = formatDateKey(rangeEnd);
+  const allowedProjects = new Set(projects.map((project) => project.id));
+  const workHoursByProject = {};
+
+  rangeRows.forEach((row) => {
+    const projectId = Number(row?.project_id);
+    if (!Number.isFinite(projectId) || !allowedProjects.has(projectId)) {
+      return;
+    }
+
+    const day = row?.work_day ? startOfDay(new Date(row.work_day)) : null;
+    if (!day || Number.isNaN(day.getTime())) {
+      return;
+    }
+    const dayKey = formatDateKey(day);
+    if (dayKey < startKey || dayKey > endKey) {
+      return;
+    }
+
+    const workHour = Number(row?.work_hour ?? 0);
+    if (!Number.isFinite(workHour) || workHour <= 0) {
+      return;
+    }
+
+    workHoursByProject[projectId] = (workHoursByProject[projectId] || 0) + workHour;
+  });
+
+  const rawByProjectId = {};
+  let totalRaw = 0;
+
+  projects.forEach((project) => {
+    const projectHours = workHoursByProject[project.id] || 0;
+    const rawPercent = totalCapacity > 0 ? (projectHours / totalCapacity) * 100 : 0;
+    rawByProjectId[project.id] = rawPercent;
+    totalRaw += rawPercent;
+  });
+
+  if (totalRaw > MAX_TOTAL_PERCENT) {
+    const normalizationFactor = MAX_TOTAL_PERCENT / totalRaw;
+    projects.forEach((project) => {
+      rawByProjectId[project.id] = rawByProjectId[project.id] * normalizationFactor;
+    });
+  }
+
+  return normalizeProjectPercents(projects, rawByProjectId);
+};
+
+const buildActivityPrefill = (activityTypes, weeklyDistribution) => {
+  const percentByType = {};
+
+  weeklyDistribution.forEach((item) => {
+    if (!item?.activity_type) return;
+    percentByType[item.activity_type] = clampPercent(Number(item.percent) || 0);
+  });
+
+  const rawByCode = {};
+  activityTypes.forEach((type) => {
+    rawByCode[type.code] = percentByType[type.code] || 0;
+  });
+
+  const normalized = {};
+  activityTypes.forEach((type) => {
+    normalized[type.code] = snapToSegmentPercent(rawByCode[type.code] || 0);
+  });
+
+  let total = sumPercentMap(normalized);
+  if (total > MAX_TOTAL_PERCENT) {
+    const sortedCodes = [...activityTypes]
+      .sort(
+        (left, right) =>
+          (normalized[right.code] || 0) - (normalized[left.code] || 0) ||
+          left.code.localeCompare(right.code)
+      )
+      .map((item) => item.code);
+
+    while (total > MAX_TOTAL_PERCENT) {
+      let adjusted = false;
+      for (let index = 0; index < sortedCodes.length && total > MAX_TOTAL_PERCENT; index += 1) {
+        const code = sortedCodes[index];
+        if ((normalized[code] || 0) <= 0) {
+          continue;
+        }
+        normalized[code] -= SEGMENT_STEP;
+        total -= SEGMENT_STEP;
+        adjusted = true;
+      }
+      if (!adjusted) break;
+    }
+  }
+
+  return normalized;
+};
+
+const buildSegmentDataEntry = ({
+  projects,
+  activityTypes,
+  rangeRows,
+  weeklyDistribution,
+  rangeStart,
+  rangeEnd
+}) => {
+  const projectPercents = buildProjectPrefill(projects, rangeRows, rangeStart, rangeEnd);
+  const activityPercents = buildActivityPrefill(activityTypes, weeklyDistribution);
+  const projectTotal = sumPercentMap(projectPercents);
+  const activityTotal = sumPercentMap(activityPercents);
+
+  return {
+    projectPercents,
+    activityPercents,
+    projectTotal,
+    activityTotal
+  };
+};
+
+const isEqualByKeys = (leftMap, rightMap, keys) =>
+  keys.every((key) => Number(leftMap[key] || 0) === Number(rightMap[key] || 0));
+
+const toPositiveInt = (value) => {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) {
+    return null;
+  }
+  return Math.trunc(number);
+};
+
+const parseMemberIdFromText = (value) => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const raw = String(value).trim();
+  if (!raw) {
+    return null;
+  }
+
+  const decoded = (() => {
+    try {
+      return decodeURIComponent(raw);
+    } catch {
+      return raw;
+    }
+  })();
+
+  const direct = toPositiveInt(decoded);
+  if (direct) {
+    return direct;
+  }
+
+  const explicitMatch = decoded.match(
+    /(?:^|[?&;,:\s])(member_id|user_id|userid|uid)\s*=\s*(\d{1,12})(?:$|[?&;,:\s])/i
+  );
+  if (explicitMatch?.[2]) {
+    return toPositiveInt(explicitMatch[2]);
+  }
+
+  return null;
+};
+
+const getQueryMemberId = () => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const candidates = [
+    params.get('member_id'),
+    params.get('user_id'),
+    params.get('userId'),
+    params.get('uid'),
+    params.get('tgWebAppStartParam')
+  ];
+
+  for (let index = 0; index < candidates.length; index += 1) {
+    const parsed = parseMemberIdFromText(candidates[index]);
+    if (parsed) {
+      return parsed;
+    }
+  }
+
+  return null;
+};
+
+const getTelegramStartParamMemberId = () => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const telegramWebApp = window.Telegram?.WebApp;
+  const fromUnsafe = parseMemberIdFromText(telegramWebApp?.initDataUnsafe?.start_param);
+  if (fromUnsafe) {
+    return fromUnsafe;
+  }
+
+  const fromSearch = parseMemberIdFromText(
+    new URLSearchParams(window.location.search).get('tgWebAppStartParam')
+  );
+  if (fromSearch) {
+    return fromSearch;
+  }
+
+  const initDataParams = new URLSearchParams(String(telegramWebApp?.initData || ''));
+  return parseMemberIdFromText(initDataParams.get('start_param'));
+};
+
+const getTelegramUserId = () => {
+  const userId = Number(window.Telegram?.WebApp?.initDataUnsafe?.user?.id || 0);
+  return Number.isFinite(userId) && userId > 0 ? userId : null;
+};
+
+const fetchSessionMemberId = async (authToken) => {
+  const payload = await requestJson(
+    `${API_BASE}/auth-service/api/v1/check`,
+    {
+      method: 'GET',
+      headers: {
+        Authorization: authToken,
+        'Content-Type': 'application/json'
+      }
+    },
+    'Не удалось получить данные текущей сессии'
+  );
+
+  const result = extractResult(payload);
+  const candidates = [
+    payload?.id,
+    payload?.member_id,
+    payload?.user_id,
+    result?.id,
+    result?.member_id,
+    result?.user_id
+  ];
+
+  for (let index = 0; index < candidates.length; index += 1) {
+    const parsed = toPositiveInt(candidates[index]);
+    if (parsed) {
+      return parsed;
+    }
+  }
+
+  return null;
+};
+
+const resolveMemberId = async (authToken) => {
+  const fromStorage = toPositiveInt(storage.getItem('userId'));
+  if (fromStorage) {
+    return fromStorage;
+  }
+
+  const fromQuery = getQueryMemberId();
+  if (fromQuery) {
+    storage.setItem('userId', String(fromQuery));
+    return fromQuery;
+  }
+
+  const fromStartParam = getTelegramStartParamMemberId();
+  if (fromStartParam) {
+    storage.setItem('userId', String(fromStartParam));
+    return fromStartParam;
+  }
+
+  const fromSession = await fetchSessionMemberId(authToken);
+  if (fromSession) {
+    storage.setItem('userId', String(fromSession));
+    return fromSession;
+  }
+
+  return null;
+};
+
+const fetchProjects = async (authToken, memberId, monthStart, monthEnd) => {
+  const monthStartQuery = formatLegacyDate(monthStart);
+  const monthEndQuery = formatLegacyDate(monthEnd);
+
+  const payload = await requestJson(
+    `${API_BASE}/project-service/api/v1/timesheet/list?member_id=${memberId}&month_start=${monthStartQuery}&month_end=${monthEndQuery}`,
+    {
+      method: 'GET',
+      headers: {
+        Authorization: authToken,
+        'Content-Type': 'application/json'
+      }
+    },
+    'Не удалось загрузить проекты'
+  );
+
+  const rows = Array.isArray(extractResult(payload))
+    ? extractResult(payload)
+    : Array.isArray(payload)
+    ? payload
+    : [];
+
+  const seen = new Set();
+  const parsed = [];
+
+  rows.forEach((item) => {
+    const sourceProject = item?.project || {};
+    const projectId = Number(sourceProject?.id || item?.project_id);
+    if (!Number.isFinite(projectId) || seen.has(projectId)) {
+      return;
+    }
+
+    const isActive = item?.is_active !== false;
+    const projectStatus = sourceProject?.project_status;
+    if (!isActive) return;
+    if (projectStatus && projectStatus !== 'Активный') return;
+
+    seen.add(projectId);
+    parsed.push({
+      id: projectId,
+      name:
+        sourceProject?.project_name ||
+        item?.project_name ||
+        item?.project?.project_name ||
+        `Проект ${projectId}`
+    });
+  });
+
+  return parsed.map((project, index) => ({
+    ...project,
+    color: getProjectColor(index)
+  }));
+};
+
+const fetchActivityTypes = async (authToken) => {
+  try {
+    const payload = await requestJson(
+      `${API_BASE}/directory-service/api/v1/timesheet/activity-types?only_active=true`,
+      {
+        method: 'GET',
+        headers: {
+          Authorization: authToken,
+          'Content-Type': 'application/json'
+        }
+      },
+      'Не удалось загрузить типы активностей'
+    );
+
+    const rows = Array.isArray(extractResult(payload))
+      ? extractResult(payload)
+      : Array.isArray(payload)
+      ? payload
+      : [];
+
+    const parsed = rows
+      .filter((item) => item?.code)
+      .sort((left, right) => {
+        const leftOrder = Number(left?.sort_order || 0);
+        const rightOrder = Number(right?.sort_order || 0);
+        return leftOrder - rightOrder;
+      })
+      .map((item) => ({
+        code: String(item.code),
+        name_ru: item?.name_ru || String(item.code)
+      }));
+
+    return parsed.length > 0 ? parsed : DEFAULT_ACTIVITY_TYPES;
+  } catch (error) {
+    return DEFAULT_ACTIVITY_TYPES;
+  }
+};
+
+const fetchRangeLite = async (authToken, memberId, projectIds, rangeStart, rangeEnd) => {
+  if (!projectIds.length) {
+    return [];
+  }
+
+  const payload = await requestJson(
+    `${API_BASE}/project-service/api/v1/timesheet/list/range-lite`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: authToken,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        member_ids: [memberId],
+        project_ids: projectIds,
+        date_from: toLocalIso(rangeStart, false),
+        date_to: toLocalIso(rangeEnd, true)
+      })
+    },
+    'Не удалось загрузить факт отрезка'
+  );
+
+  return Array.isArray(extractResult(payload))
+    ? extractResult(payload)
+    : Array.isArray(payload)
+    ? payload
+    : [];
+};
+
+const fetchWeeklyActivityDistribution = async (authToken, memberId, rangeStart, rangeEnd) => {
+  const payload = await requestJson(
+    `${API_BASE}/project-service/api/v1/timesheet/weekly-workload?member_id=${memberId}&week_start=${formatDateKey(
+      rangeStart
+    )}&week_end=${formatDateKey(rangeEnd)}`,
+    {
+      method: 'GET',
+      headers: {
+        Authorization: authToken,
+        'Content-Type': 'application/json'
+      }
+    },
+    'Не удалось загрузить weekly распределение'
+  );
+
+  const result = extractResult(payload);
+  if (!result || typeof result !== 'object') {
+    return [];
+  }
+
+  return Array.isArray(result?.activity_distribution)
+    ? result.activity_distribution
+    : [];
 };
 
 const TimeLogger = () => {
   const telegramWebApp = typeof window !== 'undefined' ? window.Telegram?.WebApp : null;
   const isTelegramWebApp = Boolean(telegramWebApp);
 
-  const [selectedMonth, setSelectedMonth] = useState(new Date());
+  const todayStart = useMemo(() => startOfDay(new Date()), []);
+  const [activeDate, setActiveDate] = useState(() => startOfDay(new Date()));
   const [step, setStep] = useState(1);
+
   const [projects, setProjects] = useState([]);
-  const [percentByProject, setPercentByProject] = useState({});
+  const [activityTypes, setActivityTypes] = useState(DEFAULT_ACTIVITY_TYPES);
+  const [projectPercentById, setProjectPercentById] = useState({});
+  const [activityPercentByCode, setActivityPercentByCode] = useState({});
+  const [initialProjectPercentById, setInitialProjectPercentById] = useState({});
+  const [initialActivityPercentByCode, setInitialActivityPercentByCode] = useState({});
+  const [segmentSummaryByKey, setSegmentSummaryByKey] = useState({});
+  const [segmentDataByKey, setSegmentDataByKey] = useState({});
+
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState(null);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [showLimitHint, setShowLimitHint] = useState(false);
+  const [memberId, setMemberId] = useState(() => toPositiveInt(storage.getItem('userId')));
+  const [rewardScope, setRewardScope] = useState(null);
 
-  const paintRef = useRef({ active: false, projectId: null });
+  const paintRef = useRef({ active: false, scope: null, key: null });
+  const tapRef = useRef({ rowKey: '', at: 0 });
+  const loadRequestRef = useRef(0);
+  const previousWeekKeyRef = useRef(null);
+  const rewardTimerRef = useRef(null);
+  const previousTotalsRef = useRef({
+    project: 0,
+    activity: 0
+  });
 
-  const totalPercent = useMemo(
-    () => Object.values(percentByProject).reduce((sum, value) => sum + (value || 0), 0),
-    [percentByProject]
+  const monthStart = useMemo(() => startOfMonth(todayStart), [todayStart]);
+  const monthEnd = useMemo(() => endOfMonth(todayStart), [todayStart]);
+  const monthSegments = useMemo(() => buildMonthSegments(monthStart), [monthStart]);
+  const activeSegmentIndex = useMemo(
+    () => resolveActiveSegmentIndex(monthSegments, activeDate),
+    [activeDate, monthSegments]
+  );
+  const activeSegment = monthSegments[activeSegmentIndex] || monthSegments[0] || null;
+  const weekStart = activeSegment?.weekStart || monthStart;
+  const weekEnd = activeSegment?.weekEnd || monthEnd;
+  const weekKey = useMemo(() => getSegmentKey(weekStart, weekEnd), [weekEnd, weekStart]);
+
+  const projectTotalPercent = useMemo(
+    () => sumPercentMap(projectPercentById),
+    [projectPercentById]
+  );
+  const activityTotalPercent = useMemo(
+    () => sumPercentMap(activityPercentByCode),
+    [activityPercentByCode]
   );
 
-  const setProjectPercent = useCallback((projectId, nextValue) => {
-    const snapped = snapToSegmentPercent(nextValue);
+  const projectKeys = useMemo(
+    () => projects.map((project) => String(project.id)),
+    [projects]
+  );
+  const activityKeys = useMemo(
+    () => activityTypes.map((type) => type.code),
+    [activityTypes]
+  );
 
-    setPercentByProject((prev) => {
-      const current = prev[projectId] || 0;
-      if (snapped === current) {
-        return prev;
-      }
+  const isProjectComplete = projectTotalPercent === MAX_TOTAL_PERCENT;
+  const isActivityComplete = activityTotalPercent === MAX_TOTAL_PERCENT;
+  const isPeriodComplete = isProjectComplete && isActivityComplete;
+  const canGoToStep2 = !isLoading && !error && projects.length > 0 && isProjectComplete;
 
-      const totalWithoutCurrent = Object.entries(prev).reduce((sum, [id, percent]) => {
-        return Number(id) === projectId ? sum : sum + (percent || 0);
-      }, 0);
-
-      if (snapped > current && totalWithoutCurrent + snapped > MAX_TOTAL_PERCENT) {
-        setShowLimitHint(true);
-        return prev;
-      }
-
-      return {
-        ...prev,
-        [projectId]: snapped
-      };
-    });
-
-    setIsSubmitted(false);
-  }, []);
-
-  const fetchProjects = useCallback(async (authToken, userId, monthDate) => {
-    const { start, end } = getMonthBounds(monthDate);
-    const monthStart = formatLegacyDate(start);
-    const monthEnd = formatLegacyDate(end);
-
-    const response = await fetch(
-      `https://test.newpulse.pkz.icdc.io/project-service/api/v1/timesheet/list?member_id=${userId}&month_start=${monthStart}&month_end=${monthEnd}`,
-      {
-        method: 'GET',
-        headers: {
-          Authorization: authToken,
-          'Content-Type': 'application/json'
-        }
-      }
-    );
-
-    if (response.status === 401 || response.status === 403) {
-      storage.removeItem('token');
-      throw new Error('Сессия истекла. Пожалуйста, войдите в систему снова.');
+  const isDirty = useMemo(() => {
+    if (!projectKeys.length && !activityKeys.length) {
+      return false;
     }
 
-    if (!response.ok) {
-      throw new Error(`Ошибка загрузки проектов (${response.status})`);
-    }
+    const projectChanged =
+      projectKeys.length > 0 &&
+      !isEqualByKeys(projectPercentById, initialProjectPercentById, projectKeys);
+    const activityChanged =
+      activityKeys.length > 0 &&
+      !isEqualByKeys(activityPercentByCode, initialActivityPercentByCode, activityKeys);
 
-    const raw = await response.json();
-    const timesheetData = Array.isArray(raw?.result) ? raw.result : Array.isArray(raw) ? raw : [];
+    return projectChanged || activityChanged;
+  }, [
+    activityKeys,
+    activityPercentByCode,
+    initialActivityPercentByCode,
+    initialProjectPercentById,
+    projectKeys,
+    projectPercentById
+  ]);
 
-    const seen = new Set();
-    const parsedProjects = [];
+  const activityRows = useMemo(
+    () =>
+      activityTypes.map((type, index) => ({
+        id: type.code,
+        name: type.name_ru,
+        color: getProjectColor(index + 3),
+        percent: activityPercentByCode[type.code] || 0
+      })),
+    [activityPercentByCode, activityTypes]
+  );
 
-    timesheetData.forEach((item) => {
-      if (!item?.project || !item?.is_active) {
-        return;
-      }
-
-      if (item.project.project_status !== 'Активный') {
-        return;
-      }
-
-      const projectId = Number(item.project.id);
-      if (!Number.isFinite(projectId)) {
-        return;
-      }
-
-      if (seen.has(projectId)) {
-        return;
-      }
-
-      seen.add(projectId);
-      parsedProjects.push({
-        id: projectId,
-        name: item.project.project_name || `Проект ${projectId}`,
-        color: getProjectColor(projectId)
-      });
-    });
-
-    return parsedProjects;
-  }, []);
-
-  const fetchMonthPrefill = useCallback(async (authToken, userId, monthDate) => {
-    const year = monthDate.getFullYear();
-    const monthKey = getMonthKey(monthDate);
-
-    const response = await fetch(
-      `https://test.newpulse.pkz.icdc.io/project-service/api/v1/timesheet/permonth/member?member_id=${userId}&year=${year}&version=2`,
-      {
-        method: 'GET',
-        headers: {
-          Authorization: authToken,
-          'Content-Type': 'application/json'
-        }
-      }
-    );
-
-    if (!response.ok) {
-      return {};
-    }
-
-    const payload = await response.json();
-    const rows = Array.isArray(payload?.result) ? payload.result : Array.isArray(payload) ? payload : [];
-
-    const result = {};
-
-    rows.forEach((item) => {
-      const projectId = Number(item?.project_id);
-      if (!Number.isFinite(projectId)) {
-        return;
-      }
-
-      const monthValue = item?.[monthKey];
-      if (!monthValue || typeof monthValue !== 'object') {
-        return;
-      }
-
-      const plannedHour = Number(monthValue.planned_hour || 0);
-      const capacityHours = Number(monthValue.capacity_hours || 0);
-      if (!Number.isFinite(plannedHour) || !Number.isFinite(capacityHours) || capacityHours <= 0) {
-        result[projectId] = 0;
-        return;
-      }
-
-      result[projectId] = snapToSegmentPercent((plannedHour / capacityHours) * 100);
-    });
-
-    return result;
-  }, []);
-
-  const loadMonthData = useCallback(async () => {
-    const authToken = storage.getItem('token');
-    const userId = storage.getItem('userId') || '3227';
-
-    if (!authToken) {
-      setError('Токен авторизации не найден. Пожалуйста, войдите в систему.');
-      return;
-    }
-
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const [fetchedProjects, fetchedPrefill] = await Promise.all([
-        fetchProjects(authToken, userId, selectedMonth),
-        fetchMonthPrefill(authToken, userId, selectedMonth)
-      ]);
-
-      setProjects(fetchedProjects);
-      setPercentByProject(() => {
-        const next = {};
-        fetchedProjects.forEach((project) => {
-          next[project.id] = fetchedPrefill[project.id] || 0;
-        });
-        return next;
-      });
-      setIsSubmitted(false);
-    } catch (fetchError) {
-      setError(fetchError.message || 'Не удалось загрузить данные месяца');
-      setProjects([]);
-      setPercentByProject({});
-    } finally {
-      setIsLoading(false);
-    }
-  }, [fetchMonthPrefill, fetchProjects, selectedMonth]);
+  const projectRows = useMemo(
+    () =>
+      projects.map((project) => ({
+        ...project,
+        percent: projectPercentById[project.id] || 0
+      })),
+    [projectPercentById, projects]
+  );
 
   useEffect(() => {
-    loadMonthData();
-  }, [loadMonthData]);
+    const isAnotherMonth =
+      activeDate.getFullYear() !== todayStart.getFullYear() ||
+      activeDate.getMonth() !== todayStart.getMonth();
+
+    if (activeDate.getTime() > todayStart.getTime() || isAnotherMonth) {
+      setActiveDate(todayStart);
+    }
+  }, [activeDate, todayStart]);
 
   useEffect(() => {
     if (!showLimitHint) {
-      return;
+      return undefined;
+    }
+    const timerId = window.setTimeout(() => setShowLimitHint(false), 1400);
+    return () => window.clearTimeout(timerId);
+  }, [showLimitHint]);
+
+  useEffect(() => {
+    const previousTotals = previousTotalsRef.current;
+    let nextRewardScope = null;
+
+    if (
+      previousTotals.project !== MAX_TOTAL_PERCENT &&
+      projectTotalPercent === MAX_TOTAL_PERCENT &&
+      !isLoading
+    ) {
+      nextRewardScope = 'project';
     }
 
-    const timer = setTimeout(() => setShowLimitHint(false), 1400);
-    return () => clearTimeout(timer);
-  }, [showLimitHint]);
+    if (
+      previousTotals.activity !== MAX_TOTAL_PERCENT &&
+      activityTotalPercent === MAX_TOTAL_PERCENT &&
+      !isLoading
+    ) {
+      nextRewardScope = 'activity';
+    }
+
+    previousTotalsRef.current = {
+      project: projectTotalPercent,
+      activity: activityTotalPercent
+    };
+
+    if (nextRewardScope) {
+      setRewardScope(nextRewardScope);
+    }
+  }, [activityTotalPercent, isLoading, projectTotalPercent]);
+
+  useEffect(() => {
+    if (!rewardScope) {
+      return undefined;
+    }
+
+    if (rewardTimerRef.current) {
+      window.clearTimeout(rewardTimerRef.current);
+    }
+
+    rewardTimerRef.current = window.setTimeout(() => {
+      setRewardScope(null);
+      rewardTimerRef.current = null;
+    }, REWARD_ANIMATION_MS);
+
+    return () => {
+      if (rewardTimerRef.current) {
+        window.clearTimeout(rewardTimerRef.current);
+        rewardTimerRef.current = null;
+      }
+    };
+  }, [rewardScope]);
 
   useEffect(() => {
     const stopPainting = () => {
       paintRef.current.active = false;
-      paintRef.current.projectId = null;
+      paintRef.current.scope = null;
+      paintRef.current.key = null;
+      paintRef.current.pointerId = undefined;
     };
 
     window.addEventListener('pointerup', stopPainting);
@@ -282,301 +1000,777 @@ const TimeLogger = () => {
     };
   }, [telegramWebApp]);
 
-  const handleSegmentPointerDown = useCallback(
-    (projectId, segmentIndex, event) => {
-      event.preventDefault();
-      paintRef.current.active = true;
-      paintRef.current.projectId = projectId;
-      setProjectPercent(projectId, (segmentIndex + 1) * SEGMENT_STEP);
-    },
-    [setProjectPercent]
-  );
-
-  const handleSegmentPointerEnter = useCallback(
-    (projectId, segmentIndex) => {
-      if (!paintRef.current.active || paintRef.current.projectId !== projectId) {
-        return;
+  const ensureMemberId = useCallback(
+    async (authToken) => {
+      if (memberId) {
+        return memberId;
       }
 
-      setProjectPercent(projectId, (segmentIndex + 1) * SEGMENT_STEP);
+      const resolved = await resolveMemberId(authToken);
+      if (resolved) {
+        setMemberId(resolved);
+        return resolved;
+      }
+
+      return null;
     },
-    [setProjectPercent]
+    [memberId]
   );
 
-  const handleSubmit = useCallback(async () => {
+  const applySegmentData = useCallback((segmentEntry) => {
+    if (!segmentEntry) return;
+
+    setProjectPercentById(segmentEntry.projectPercents);
+    setInitialProjectPercentById(segmentEntry.projectPercents);
+    setActivityPercentByCode(segmentEntry.activityPercents);
+    setInitialActivityPercentByCode(segmentEntry.activityPercents);
+  }, []);
+
+  const loadMonthData = useCallback(async () => {
     const authToken = storage.getItem('token');
-    const userId = Number(storage.getItem('userId') || '3227');
 
     if (!authToken) {
       setError('Токен авторизации не найден. Пожалуйста, войдите в систему.');
       return;
     }
-
-    if (totalPercent > MAX_TOTAL_PERCENT) {
-      setError('Сумма процентов больше 100%. Уменьшите значения и повторите.');
+    const resolvedMemberId = await ensureMemberId(authToken);
+    if (!resolvedMemberId) {
+      setError('Не удалось определить пользователя. Нужен member_id в сессии/start_param.');
       return;
     }
 
-    const { start, end } = getMonthBounds(selectedMonth);
+    const requestId = loadRequestRef.current + 1;
+    loadRequestRef.current = requestId;
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const [fetchedProjects, fetchedActivityTypes] = await Promise.all([
+        fetchProjects(authToken, resolvedMemberId, monthStart, monthEnd),
+        fetchActivityTypes(authToken)
+      ]);
+
+      const projectIds = fetchedProjects.map((project) => project.id);
+      const segmentPayloads = await Promise.all(
+        monthSegments.map(async (segment) => {
+          const [rangeRows, weeklyDistribution] = await Promise.all([
+            fetchRangeLite(
+              authToken,
+              resolvedMemberId,
+              projectIds,
+              segment.weekStart,
+              segment.weekEnd
+            ),
+            fetchWeeklyActivityDistribution(
+              authToken,
+              resolvedMemberId,
+              segment.weekStart,
+              segment.weekEnd
+            )
+          ]);
+
+          const segmentKey = getSegmentKey(segment.weekStart, segment.weekEnd);
+          const entry = buildSegmentDataEntry({
+            projects: fetchedProjects,
+            activityTypes: fetchedActivityTypes,
+            rangeRows,
+            weeklyDistribution,
+            rangeStart: segment.weekStart,
+            rangeEnd: segment.weekEnd
+          });
+
+          return {
+            segmentKey,
+            entry
+          };
+        })
+      );
+
+      if (loadRequestRef.current !== requestId) {
+        return;
+      }
+
+      const nextSegmentDataByKey = {};
+      const nextSummaryByKey = {};
+      segmentPayloads.forEach((item) => {
+        nextSegmentDataByKey[item.segmentKey] = item.entry;
+        nextSummaryByKey[item.segmentKey] = {
+          projectTotal: item.entry.projectTotal,
+          activityTotal: item.entry.activityTotal
+        };
+      });
+
+      setProjects(fetchedProjects);
+      setActivityTypes(fetchedActivityTypes);
+      setSegmentDataByKey(nextSegmentDataByKey);
+      setSegmentSummaryByKey(nextSummaryByKey);
+
+      const activeEntry = nextSegmentDataByKey[weekKey];
+      if (activeEntry) {
+        applySegmentData(activeEntry);
+      } else {
+        const emptyProjectPercents = {};
+        fetchedProjects.forEach((project) => {
+          emptyProjectPercents[project.id] = 0;
+        });
+        const emptyActivityPercents = {};
+        fetchedActivityTypes.forEach((type) => {
+          emptyActivityPercents[type.code] = 0;
+        });
+
+        applySegmentData({
+          projectPercents: emptyProjectPercents,
+          activityPercents: emptyActivityPercents
+        });
+      }
+
+      setIsSubmitted(false);
+      setStep(1);
+      previousWeekKeyRef.current = weekKey;
+    } catch (loadError) {
+      if (loadRequestRef.current !== requestId) {
+        return;
+      }
+      setError(loadError.message || 'Не удалось загрузить weekly данные');
+      setProjects([]);
+      setActivityTypes(DEFAULT_ACTIVITY_TYPES);
+      setProjectPercentById({});
+      setInitialProjectPercentById({});
+      setActivityPercentByCode({});
+      setInitialActivityPercentByCode({});
+      setSegmentDataByKey({});
+      setSegmentSummaryByKey({});
+    } finally {
+      if (loadRequestRef.current === requestId) {
+        setIsLoading(false);
+      }
+    }
+  }, [applySegmentData, ensureMemberId, monthEnd, monthSegments, monthStart, weekKey]);
+
+  useEffect(() => {
+    loadMonthData();
+  }, [loadMonthData]);
+
+  useEffect(() => {
+    if (previousWeekKeyRef.current === weekKey) {
+      return;
+    }
+
+    previousWeekKeyRef.current = weekKey;
+
+    const nextEntry = segmentDataByKey[weekKey];
+    if (!nextEntry) {
+      return;
+    }
+
+    applySegmentData(nextEntry);
+    setIsSubmitted(false);
+    setStep(1);
+  }, [applySegmentData, segmentDataByKey, weekKey]);
+
+  const updatePercentValue = useCallback((scope, key, nextValue) => {
+    const snapped = snapToSegmentPercent(nextValue);
+
+    const applyUpdate = (setter) => {
+      setter((prev) => {
+        const stringKey = String(key);
+        const current = prev[stringKey] || 0;
+        if (snapped === current) {
+          return prev;
+        }
+
+        const totalWithoutCurrent = Object.entries(prev).reduce((sum, [entryKey, value]) => {
+          if (entryKey === stringKey) return sum;
+          return sum + (Number(value) || 0);
+        }, 0);
+
+        if (snapped > current && totalWithoutCurrent + snapped > MAX_TOTAL_PERCENT) {
+          setShowLimitHint(true);
+          return prev;
+        }
+
+        return {
+          ...prev,
+          [stringKey]: snapped
+        };
+      });
+    };
+
+    if (scope === 'project') {
+      applyUpdate(setProjectPercentById);
+    } else {
+      applyUpdate(setActivityPercentByCode);
+    }
+
+    setIsSubmitted(false);
+  }, []);
+
+  const setRowToAvailableMax = useCallback((scope, key) => {
+    const applyMax = (setter) => {
+      setter((prev) => {
+        const stringKey = String(key);
+        const totalWithoutCurrent = Object.entries(prev).reduce((sum, [entryKey, value]) => {
+          if (entryKey === stringKey) return sum;
+          return sum + (Number(value) || 0);
+        }, 0);
+
+        const maxAllowedRaw = Math.max(0, MAX_TOTAL_PERCENT - totalWithoutCurrent);
+        const maxAllowed = Math.max(
+          0,
+          Math.min(
+            MAX_TOTAL_PERCENT,
+            Math.floor(maxAllowedRaw / SEGMENT_STEP) * SEGMENT_STEP
+          )
+        );
+
+        if ((prev[stringKey] || 0) === maxAllowed) {
+          return prev;
+        }
+
+        return {
+          ...prev,
+          [stringKey]: maxAllowed
+        };
+      });
+    };
+
+    if (scope === 'project') {
+      applyMax(setProjectPercentById);
+    } else {
+      applyMax(setActivityPercentByCode);
+    }
+
+    setIsSubmitted(false);
+  }, []);
+
+  const resolvePercentFromPointer = useCallback((event) => {
+    const track = event.currentTarget;
+    if (!track) {
+      return 0;
+    }
+
+    const rect = track.getBoundingClientRect();
+    const width = Math.max(1, rect.width);
+    const offsetX = Math.min(width, Math.max(0, event.clientX - rect.left));
+    const ratio = offsetX / width;
+    const snapped = Math.round((ratio * MAX_TOTAL_PERCENT) / SEGMENT_STEP) * SEGMENT_STEP;
+
+    return clampPercent(snapped);
+  }, []);
+
+  const handleTrackPointerDown = useCallback(
+    (scope, key, event) => {
+      event.preventDefault();
+
+      const rowKey = `${scope}:${String(key)}`;
+      const now = Date.now();
+      const isDoubleTap =
+        tapRef.current.rowKey === rowKey &&
+        now - tapRef.current.at <= DOUBLE_TAP_THRESHOLD_MS;
+      tapRef.current = {
+        rowKey,
+        at: now
+      };
+
+      if (isDoubleTap) {
+        paintRef.current.active = false;
+        paintRef.current.scope = null;
+        paintRef.current.key = null;
+        paintRef.current.pointerId = undefined;
+        setRowToAvailableMax(scope, key);
+        return;
+      }
+
+      const nextPercent = resolvePercentFromPointer(event);
+      paintRef.current.active = true;
+      paintRef.current.scope = scope;
+      paintRef.current.key = String(key);
+      paintRef.current.pointerId = event.pointerId;
+
+      try {
+        event.currentTarget?.setPointerCapture?.(event.pointerId);
+      } catch {
+        /* noop */
+      }
+
+      updatePercentValue(scope, key, nextPercent);
+    },
+    [resolvePercentFromPointer, setRowToAvailableMax, updatePercentValue]
+  );
+
+  const handleTrackPointerMove = useCallback(
+    (scope, key, event) => {
+      if (!paintRef.current.active) {
+        return;
+      }
+      if (paintRef.current.scope !== scope || paintRef.current.key !== String(key)) {
+        return;
+      }
+      if (
+        paintRef.current.pointerId !== undefined &&
+        paintRef.current.pointerId !== event.pointerId
+      ) {
+        return;
+      }
+
+      const nextPercent = resolvePercentFromPointer(event);
+      updatePercentValue(scope, key, nextPercent);
+    },
+    [resolvePercentFromPointer, updatePercentValue]
+  );
+
+  const handleTrackPointerEnd = useCallback((event) => {
+    if (paintRef.current.pointerId !== undefined) {
+      try {
+        event.currentTarget?.releasePointerCapture?.(paintRef.current.pointerId);
+      } catch {
+        /* noop */
+      }
+    }
+
+    paintRef.current.active = false;
+    paintRef.current.scope = null;
+    paintRef.current.key = null;
+    paintRef.current.pointerId = undefined;
+  }, []);
+
+  const confirmRangeSwitch = useCallback(() => {
+    if (!isDirty || isSaving) {
+      return true;
+    }
+    return window.confirm(
+      'Есть несохраненные изменения. Перейти на другой отрезок без сохранения?'
+    );
+  }, [isDirty, isSaving]);
+
+  const selectSegment = useCallback(
+    (segment) => {
+      if (!segment) return;
+      if (segment.weekStart.getTime() > todayStart.getTime()) return;
+      if (segment.id === activeSegment?.id) return;
+      if (!confirmRangeSwitch()) return;
+
+      setActiveDate(startOfDay(segment.weekStart));
+    },
+    [activeSegment?.id, confirmRangeSwitch, todayStart]
+  );
+
+  const handleSubmit = useCallback(async () => {
+    const authToken = storage.getItem('token');
+
+    if (!authToken) {
+      setError('Токен авторизации не найден. Пожалуйста, войдите в систему.');
+      return;
+    }
+    const resolvedMemberId = await ensureMemberId(authToken);
+    if (!resolvedMemberId) {
+      setError('Не удалось определить пользователя. Нужен member_id в сессии/start_param.');
+      return;
+    }
+
+    if (!isPeriodComplete) {
+      setError('Оба шага должны быть заполнены ровно до 100%.');
+      return;
+    }
 
     setIsSaving(true);
     setError(null);
 
     try {
-      const requests = projects.map(async (project) => {
-        const utilization = percentByProject[project.id] || 0;
+      const projectFacts = buildProjectFactsPayload(
+        resolvedMemberId,
+        projects,
+        projectPercentById,
+        weekStart,
+        weekEnd
+      );
 
-        const response = await fetch('https://test.newpulse.pkz.icdc.io/project-service/api/v1/timesheet/planned/range', {
-          method: 'POST',
+      const activityDistribution = activityTypes
+        .map((type) => ({
+          activity_type: type.code,
+          percent: clampPercent(activityPercentByCode[type.code] || 0)
+        }))
+        .filter((item) => item.percent > 0);
+
+      const activityPercentSum = activityDistribution.reduce(
+        (sum, item) => sum + item.percent,
+        0
+      );
+      if (activityPercentSum !== MAX_TOTAL_PERCENT) {
+        throw new Error('Распределение активностей должно быть равно 100%');
+      }
+
+      await requestJson(
+        `${API_BASE}/project-service/api/v1/timesheet/weekly-workload`,
+        {
+          method: 'PUT',
           headers: {
             Authorization: authToken,
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            project_id: project.id,
-            member_id: userId,
-            date_from: start.toISOString(),
-            date_to: end.toISOString(),
-            utilization,
-            include_days_off: false
+            member_id: resolvedMemberId,
+            week_start: formatDateKey(weekStart),
+            week_end: formatDateKey(weekEnd),
+            project_facts: projectFacts,
+            activity_distribution: activityDistribution
           })
-        });
-
-        if (!response.ok) {
-          throw new Error(`Не удалось сохранить проект ${project.name} (${response.status})`);
-        }
-      });
-
-      await Promise.all(requests);
+        },
+        'Не удалось сохранить weekly распределение'
+      );
 
       if (window.Telegram?.WebApp) {
         window.Telegram.WebApp.sendData(
           JSON.stringify({
-            type: 'quickmonthutilization',
-            month: `${selectedMonth.getFullYear()}-${String(selectedMonth.getMonth() + 1).padStart(2, '0')}`,
-            total: totalPercent,
+            type: 'quickutilization',
+            member_id: resolvedMemberId,
+            telegram_id: getTelegramUserId(),
+            week_start: formatDateKey(weekStart),
+            week_end: formatDateKey(weekEnd),
+            project_total: projectTotalPercent,
+            activity_total: activityTotalPercent,
             projects: projects.map((project) => ({
               project_id: project.id,
-              percent: percentByProject[project.id] || 0
+              percent: projectPercentById[project.id] || 0
+            })),
+            activity_distribution: activityTypes.map((type) => ({
+              activity_type: type.code,
+              percent: activityPercentByCode[type.code] || 0
             }))
           })
         );
       }
 
+      setSegmentDataByKey((prev) => ({
+        ...prev,
+        [weekKey]: {
+          projectPercents: { ...projectPercentById },
+          activityPercents: { ...activityPercentByCode },
+          projectTotal: projectTotalPercent,
+          activityTotal: activityTotalPercent
+        }
+      }));
+      setSegmentSummaryByKey((prev) => ({
+        ...prev,
+        [weekKey]: {
+          projectTotal: projectTotalPercent,
+          activityTotal: activityTotalPercent
+        }
+      }));
+
+      setInitialProjectPercentById({ ...projectPercentById });
+      setInitialActivityPercentByCode({ ...activityPercentByCode });
       setIsSubmitted(true);
     } catch (submitError) {
-      setError(submitError.message || 'Ошибка сохранения процентов');
+      setError(submitError.message || 'Ошибка сохранения weekly распределения');
       setIsSubmitted(false);
     } finally {
       setIsSaving(false);
     }
-  }, [percentByProject, projects, selectedMonth, totalPercent]);
+  }, [
+    activityPercentByCode,
+    activityTotalPercent,
+    activityTypes,
+    isPeriodComplete,
+    projectPercentById,
+    projectTotalPercent,
+    projects,
+    weekEnd,
+    weekStart,
+    weekKey,
+    ensureMemberId
+  ]);
 
   useEffect(() => {
     if (!telegramWebApp) {
       return undefined;
     }
 
-    const handleMainButtonClick = () => {
-      if (step === 1 && !isLoading && projects.length > 0) {
-        setStep(2);
+    const onMainButtonClick = () => {
+      if (step === 1) {
+        if (canGoToStep2) {
+          setStep(2);
+        }
         return;
       }
+
       if (step === 2) {
         handleSubmit();
       }
     };
 
-    const handleBackButtonClick = () => {
+    const onBackButtonClick = () => {
       if (step === 2 && !isSaving) {
         setStep(1);
       }
     };
 
-    const syncTelegramButtons = () => {
+    const syncButtons = () => {
       const mainButton = telegramWebApp.MainButton;
       const backButton = telegramWebApp.BackButton;
-
+      const themeParams = telegramWebApp.themeParams || {};
       const baseParams = {
-        color: telegramWebApp.themeParams?.button_color,
-        text_color: telegramWebApp.themeParams?.button_text_color
+        color: themeParams.button_color,
+        text_color: themeParams.button_text_color
       };
 
       if (step === 1) {
-        const canGoToStep2 = !isLoading && projects.length > 0;
-        if (canGoToStep2) {
-          mainButton.setParams({
-            ...baseParams,
-            text: 'К шагу 2',
-            is_active: true,
-            is_visible: true
-          });
-          mainButton.show();
-        } else {
-          mainButton.hide();
-        }
+        const canProceed = canGoToStep2;
+        mainButton.setParams({
+          ...baseParams,
+          text: canProceed ? 'К шагу 2' : `Инициативы: ${projectTotalPercent}%`,
+          is_active: canProceed,
+          is_visible: true
+        });
+        mainButton.show();
         backButton.hide();
         return;
       }
 
-      const canSubmit = !isSaving && projects.length > 0 && totalPercent <= MAX_TOTAL_PERCENT;
+      const canSave = !isSaving && isPeriodComplete && projects.length > 0;
       mainButton.setParams({
         ...baseParams,
-        text: isSaving ? 'Сохраняем...' : isSubmitted ? 'Сохранено' : 'Сохранить проценты',
-        is_active: canSubmit,
+        text: isSaving ? 'Сохраняем...' : isSubmitted ? 'Сохранено' : 'Сохранить отрезок',
+        is_active: canSave,
         is_visible: true
       });
       mainButton.show();
-
-      if (step === 2) {
-        backButton.show();
-      } else {
-        backButton.hide();
-      }
+      backButton.show();
     };
 
-    syncTelegramButtons();
-
-    telegramWebApp.onEvent('mainButtonClicked', handleMainButtonClick);
-    telegramWebApp.onEvent('backButtonClicked', handleBackButtonClick);
+    syncButtons();
+    telegramWebApp.onEvent('mainButtonClicked', onMainButtonClick);
+    telegramWebApp.onEvent('backButtonClicked', onBackButtonClick);
 
     return () => {
-      telegramWebApp.offEvent('mainButtonClicked', handleMainButtonClick);
-      telegramWebApp.offEvent('backButtonClicked', handleBackButtonClick);
+      telegramWebApp.offEvent('mainButtonClicked', onMainButtonClick);
+      telegramWebApp.offEvent('backButtonClicked', onBackButtonClick);
     };
-  }, [handleSubmit, isLoading, isSaving, isSubmitted, projects.length, step, telegramWebApp, totalPercent]);
+  }, [
+    canGoToStep2,
+    handleSubmit,
+    isPeriodComplete,
+    isSaving,
+    isSubmitted,
+    projectTotalPercent,
+    projects.length,
+    step,
+    telegramWebApp
+  ]);
+
+  const renderedRows = step === 1 ? projectRows : activityRows;
+  const currentScope = step === 1 ? 'project' : 'activity';
+  const currentTotal = step === 1 ? projectTotalPercent : activityTotalPercent;
+  const isCurrentComplete = currentTotal === MAX_TOTAL_PERCENT;
+  const isCurrentRewardActive = rewardScope === currentScope;
+  const baseStepHint =
+    step === 1
+      ? 'Шаг 1. Распределите фокус по инициативам на выбранный отрезок.'
+      : 'Шаг 2. Распределите те же 100% по активностям.';
+
+  let infoText = baseStepHint;
+  let infoTone = 'neutral';
+  let showInfoRetry = false;
+
+  if (error) {
+    infoText = error;
+    infoTone = 'danger';
+    showInfoRetry = true;
+  } else if (isSaving) {
+    infoText = 'Сохраняем отрезок...';
+    infoTone = 'info';
+  } else if (isLoading) {
+    infoText = 'Загружаем данные отрезков...';
+    infoTone = 'info';
+  } else if (showLimitHint) {
+    infoText = 'Нельзя закрасить больше 100% в текущем шаге';
+    infoTone = 'warning';
+  } else if (isSubmitted) {
+    infoText = 'Отрезок успешно сохранен';
+    infoTone = 'success';
+  }
 
   return (
     <div className={`time-logger ${isTelegramWebApp ? 'telegram-mode' : ''}`}>
-      <div className="stepper">
-        <div className={`stepper__item ${step >= 1 ? 'active' : ''}`}>1. Месяц</div>
-        <div className={`stepper__item ${step >= 2 ? 'active' : ''}`}>2. Проценты</div>
+      <div className="stepper" role="group" aria-label="Шаги заполнения">
+        <button
+          type="button"
+          className={`stepper__node ${step === 1 ? 'active' : step > 1 && isProjectComplete ? 'done' : ''}`}
+          onClick={() => setStep(1)}
+          aria-current={step === 1 ? 'step' : undefined}
+        >
+          <span className="stepper__text">Инициативы</span>
+        </button>
+        <div className={`stepper__line ${step === 2 || isProjectComplete ? 'active' : ''}`} aria-hidden="true" />
+        <button
+          type="button"
+          className={`stepper__node ${step === 2 ? 'active' : isActivityComplete ? 'done' : ''}`}
+          onClick={() => {
+            if (canGoToStep2) setStep(2);
+          }}
+          disabled={!canGoToStep2 && step !== 2}
+          aria-current={step === 2 ? 'step' : undefined}
+        >
+          <span className="stepper__text">Активности</span>
+        </button>
       </div>
 
-      <section className="panel">
-        <h2 className="panel__title">Шаг 1. Выберите месяц</h2>
-        <DatePicker
-          selected={selectedMonth}
-          onChange={(date) => {
-            if (!date) return;
-            setSelectedMonth(date);
-            setStep(1);
-          }}
-          dateFormat="MM.yyyy"
-          showMonthYearPicker
-          className="date-picker-input"
-          placeholderText="Выберите месяц"
-        />
+      <div className="segments-bar" role="tablist" aria-label="Недельные отрезки">
+        {monthSegments.map((segment) => {
+          const isFuture = segment.weekStart.getTime() > todayStart.getTime();
+          const isActive = activeSegment?.id === segment.id;
+          const summaryKey = `${formatDateKey(segment.weekStart)}_${formatDateKey(segment.weekEnd)}`;
+          const summary = segmentSummaryByKey[summaryKey];
+          const isDone =
+            (summary?.projectTotal || 0) === MAX_TOTAL_PERCENT &&
+            (summary?.activityTotal || 0) === MAX_TOTAL_PERCENT;
 
-        {!isTelegramWebApp && (
-          <button
-            type="button"
-            className="primary-button"
-            onClick={() => setStep(2)}
-            disabled={isLoading || projects.length === 0}
-          >
-            К шагу 2
-          </button>
-        )}
-        {isTelegramWebApp && <div className="telegram-actions-hint">Действия доступны через кнопку Telegram снизу</div>}
-      </section>
+          return (
+            <button
+              key={segment.id}
+              type="button"
+              className={`segment-chip ${isActive ? 'active' : ''} ${isDone ? 'done' : ''}`}
+              onClick={() => selectSegment(segment)}
+              disabled={isFuture || isLoading || isSaving}
+            >
+              <span className="segment-chip__label">{segment.label}</span>
+              <span className="segment-chip__meta">
+                {summary ? `${summary.projectTotal}% / ${summary.activityTotal}%` : '-- / --'}
+              </span>
+            </button>
+          );
+        })}
+      </div>
 
-      {isLoading && (
-        <div className="loading-container">
-          <div className="spinner" />
-          <p>Загрузка данных месяца...</p>
-        </div>
-      )}
+      <div className={`summary-total ${isCurrentComplete ? 'complete' : ''} ${isCurrentRewardActive ? 'reward' : ''}`}>
+        <span className="total-label">{step === 1 ? 'Инициативы' : 'Активности'}</span>
+        <span className={`total-hours ${isCurrentComplete ? 'complete' : ''}`}>
+          {currentTotal}% из {MAX_TOTAL_PERCENT}%
+          <span className={`total-check ${isCurrentComplete ? 'visible' : ''}`} aria-hidden={!isCurrentComplete}>
+            ✓
+          </span>
+        </span>
+      </div>
 
-      {error && (
-        <div className="error-container">
-          <p>{error}</p>
-          <button type="button" className="retry-button" onClick={loadMonthData}>
+      <div className={`step-description step-description--${infoTone}`}>
+        <span className="step-description__text">{infoText}</span>
+        {showInfoRetry && (
+          <button type="button" className="step-description__retry" onClick={loadMonthData}>
             Обновить
           </button>
-        </div>
-      )}
+        )}
+      </div>
 
-      {!isLoading && !error && step === 2 && (
-        <section className="panel panel--list">
-          <div className="summary-total">
-            <span className="total-label">Сумма:</span>
-            <span className={`total-hours ${totalPercent > MAX_TOTAL_PERCENT ? 'limit-reached' : ''}`}>
-              {totalPercent}% / {MAX_TOTAL_PERCENT}%
-            </span>
-          </div>
+      <section className="panel panel--list">
+          {renderedRows.length > 0 ? (
+            <div className="segments-list">
+              {renderedRows.map((row) => {
+                const rowPercent = row.percent || 0;
 
-          {showLimitHint && <div className="limit-hint">Нельзя закрасить больше 100% суммарно</div>}
+                return (
+                  <div key={row.id} className="project-card">
+                    <div
+                      className="segment-strip"
+                      role="slider"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={rowPercent}
+                      style={{
+                        borderColor: `${row.color}88`,
+                        backgroundColor: `${row.color}22`
+                      }}
+                      onPointerDown={(event) => handleTrackPointerDown(currentScope, row.id, event)}
+                      onPointerMove={(event) => handleTrackPointerMove(currentScope, row.id, event)}
+                      onPointerUp={handleTrackPointerEnd}
+                      onPointerCancel={handleTrackPointerEnd}
+                      onLostPointerCapture={handleTrackPointerEnd}
+                      aria-valuetext={`${rowPercent}%`}
+                    >
+                      <div
+                        className="segment-strip__fill"
+                        style={{
+                          width: `${rowPercent}%`,
+                          background: `linear-gradient(90deg, ${row.color} 0%, ${row.color}CC 100%)`
+                        }}
+                        aria-hidden="true"
+                      />
 
-          <div className="segments-list">
-            {projects.map((project) => {
-              const projectPercent = percentByProject[project.id] || 0;
-              const filledSegments = Math.round(projectPercent / SEGMENT_STEP);
+                      <div className="segment-strip__content">
+                        <div className="project-label">
+                          <span className="project-dot" style={{ backgroundColor: row.color }} />
+                          <span className="project-name">{row.name}</span>
+                        </div>
 
-              return (
-                <div key={project.id} className="project-card">
-                  <div className="project-card__header">
-                    <div className="project-label">
-                      <span className="project-dot" style={{ backgroundColor: project.color }} />
-                      <span className="project-name">{project.name}</span>
-                    </div>
-                    <div className="project-actions">
-                      <span className="project-percent">{projectPercent}%</span>
-                      <button
-                        type="button"
-                        className="clear-button"
-                        onClick={() => setProjectPercent(project.id, 0)}
-                        aria-label={`Сбросить ${project.name} до 0 процентов`}
-                      >
-                        0%
-                      </button>
+                        <div className="project-actions">
+                          <span className="project-percent">{rowPercent}%</span>
+                        </div>
+                      </div>
                     </div>
                   </div>
-
-                  <div className="segment-strip" role="slider" aria-valuemin={0} aria-valuemax={100} aria-valuenow={projectPercent}>
-                    {Array.from({ length: SEGMENTS_COUNT }).map((_, index) => {
-                      const isFilled = index < filledSegments;
-                      return (
-                        <button
-                          key={`${project.id}_${index}`}
-                          type="button"
-                          className={`segment-cell ${isFilled ? 'filled' : ''}`}
-                          onPointerDown={(event) => handleSegmentPointerDown(project.id, index, event)}
-                          onPointerEnter={() => handleSegmentPointerEnter(project.id, index)}
-                          aria-label={`${project.name}: ${((index + 1) * SEGMENT_STEP)} процентов`}
-                        />
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="no-projects">
+              <p>
+                {step === 1
+                  ? 'Нет активных инициатив в выбранном отрезке'
+                  : 'Нет активных типов активностей'}
+              </p>
+            </div>
+          )}
 
           {!isTelegramWebApp && (
             <div className="actions-row">
-              <button type="button" className="secondary-button" onClick={() => setStep(1)} disabled={isSaving}>
-                Назад
-              </button>
-              <button
-                type="button"
-                className={`primary-button ${isSubmitted ? 'submitted' : ''}`}
-                onClick={handleSubmit}
-                disabled={isSaving || projects.length === 0 || totalPercent > MAX_TOTAL_PERCENT}
-              >
-                {isSaving ? 'Сохраняем...' : isSubmitted ? 'Сохранено' : 'Сохранить проценты'}
-              </button>
+              {step === 2 ? (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => setStep(1)}
+                  disabled={isSaving}
+                >
+                  Назад
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => loadMonthData()}
+                  disabled={isSaving || isLoading}
+                >
+                  Обновить
+                </button>
+              )}
+
+              {step === 1 ? (
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={() => setStep(2)}
+                  disabled={!canGoToStep2}
+                >
+                  К шагу 2
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className={`primary-button ${isSubmitted ? 'submitted' : ''}`}
+                  onClick={handleSubmit}
+                  disabled={isSaving || !isPeriodComplete || projects.length === 0}
+                >
+                  {isSaving ? 'Сохраняем...' : isSubmitted ? 'Сохранено' : 'Сохранить отрезок'}
+                </button>
+              )}
             </div>
           )}
-          {isTelegramWebApp && <div className="telegram-actions-hint">Назад и сохранение управляются кнопками Telegram</div>}
-        </section>
-      )}
 
-      {!isLoading && !error && step === 2 && projects.length === 0 && (
-        <div className="no-projects">
-          <p>Нет активных проектов в выбранном месяце</p>
-        </div>
-      )}
+          {isTelegramWebApp && (
+            <div className="telegram-actions-hint">
+              Управление шагами и сохранением через кнопки Telegram внизу.
+            </div>
+          )}
+      </section>
     </div>
   );
 };
