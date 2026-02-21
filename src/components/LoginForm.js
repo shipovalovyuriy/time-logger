@@ -2,6 +2,67 @@ import React, { useState, useEffect } from 'react';
 import './LoginForm.css';
 import storage from '../utils/storage';
 
+const API_BASE = 'https://test.newpulse.pkz.icdc.io';
+
+const toBearerToken = (token) => {
+  const raw = String(token || '').trim();
+  if (!raw) {
+    return '';
+  }
+  if (raw.toLowerCase().startsWith('bearer ')) {
+    return raw;
+  }
+  return `Bearer ${raw}`;
+};
+
+const toPositiveInt = (value) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+  return Math.trunc(parsed);
+};
+
+const extractMemberId = (payload) => {
+  const result =
+    payload && typeof payload === 'object' && !Array.isArray(payload) && 'result' in payload
+      ? payload.result
+      : payload;
+
+  const candidates = [
+    payload?.id,
+    payload?.member_id,
+    payload?.user_id,
+    payload?.value?.id,
+    payload?.result?.id,
+    payload?.result?.value?.id,
+    result?.id,
+    result?.member_id,
+    result?.user_id,
+    result?.value?.id
+  ];
+
+  for (let index = 0; index < candidates.length; index += 1) {
+    const parsed = toPositiveInt(candidates[index]);
+    if (parsed) {
+      return parsed;
+    }
+  }
+
+  return null;
+};
+
+const getErrorMessageFromPayload = (payload) => {
+  if (!payload || typeof payload !== 'object') return '';
+  return (
+    payload.message ||
+    payload.error ||
+    payload?.data?.message ||
+    payload?.result?.message ||
+    ''
+  );
+};
+
 const LoginForm = ({ onLoginSuccess }) => {
   const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
@@ -9,10 +70,7 @@ const LoginForm = ({ onLoginSuccess }) => {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    // Check if localStorage is available
     const storageInfo = storage.getInfo();
-    console.log('LoginForm: Storage info:', storageInfo);
-    
     if (!storageInfo.available) {
       setError('localStorage недоступен в вашем браузере. Приложение не может работать.');
     }
@@ -33,59 +91,67 @@ const LoginForm = ({ onLoginSuccess }) => {
     setError('');
 
     try {
-      console.log('Attempting login with:', { login, password });
-      
-      const response = await fetch('https://test.newpulse.pkz.icdc.io/auth-service/api/v1/login', {
+      const response = await fetch(`${API_BASE}/auth-service/api/v1/login`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ login, pass: password })
       });
 
-      console.log('Login response status:', response.status);
-      
-      if (response.ok) {
-        const data = await response.json();
-        console.log('Login response data:', data);
-        
-        // Try to save token to localStorage using utility
-        // Use 'message' field from API response as the token
-        const tokenValue = `Bearer ${data.message || data.token || data.accessToken || data.authToken}`;
-        console.log('Saving token to localStorage:', tokenValue);
-        
-        const saveSuccess = storage.setItem('token', tokenValue);
-        
-        if (saveSuccess) {
-          // Verify it was saved
-          const savedToken = storage.getItem('token');
-          console.log('Verified saved token:', savedToken);
-          
-          if (savedToken) {
-            console.log('Token successfully saved to localStorage');
-            
-            // Also save user info if available
-            if (data.userId || data.member_id) {
-              storage.setItem('userId', data.userId || data.member_id);
-            }
-            
-            onLoginSuccess();
-          } else {
-            console.error('Failed to save token to localStorage');
-            setError('Ошибка сохранения токена в браузере. Проверьте настройки браузера.');
-          }
-        } else {
-          console.error('Storage utility failed to save token');
-          setError('Ошибка сохранения в браузере. Проверьте настройки браузера.');
-        }
-      } else {
-        const errorData = await response.text();
-        console.error('Login failed:', response.status, errorData);
-        setError(`Ошибка входа: ${response.status} - ${errorData}`);
+      const payload = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        const apiMessage = getErrorMessageFromPayload(payload);
+        setError(apiMessage || `Ошибка входа: ${response.status}`);
+        return;
       }
-    } catch (error) {
-      console.error('Network error:', error);
-      setError(`Ошибка сети: ${error.message}`);
+
+      const rawToken = payload?.message || payload?.token || payload?.accessToken || payload?.authToken;
+      const tokenValue = toBearerToken(rawToken);
+      if (!tokenValue) {
+        setError('Сервер не вернул токен авторизации.');
+        return;
+      }
+
+      if (!storage.setItem('token', tokenValue)) {
+        setError('Ошибка сохранения токена в браузере. Проверьте настройки браузера.');
+        return;
+      }
+
+      const memberId = extractMemberId(payload);
+      if (memberId) {
+        storage.setItem('userId', String(memberId));
+      }
+
+      const telegramWebApp = window.Telegram?.WebApp;
+      const initData = String(telegramWebApp?.initData || '').trim();
+      if (telegramWebApp && initData) {
+        const linkResponse = await fetch(`${API_BASE}/auth-service/api/v1/telegram/link`, {
+          method: 'POST',
+          headers: {
+            Authorization: tokenValue,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            init_data: initData
+          })
+        });
+
+        if (!linkResponse.ok) {
+          const linkPayload = await linkResponse.json().catch(() => null);
+          const linkMessage = getErrorMessageFromPayload(linkPayload);
+
+          storage.removeItem('token');
+          storage.removeItem('userId');
+          setError(linkMessage || 'Не удалось привязать Telegram аккаунт. Попробуйте снова.');
+          return;
+        }
+      }
+
+      onLoginSuccess();
+    } catch (requestError) {
+      setError(`Ошибка сети: ${requestError.message}`);
     } finally {
       setIsLoading(false);
     }
@@ -98,7 +164,7 @@ const LoginForm = ({ onLoginSuccess }) => {
           <h2>Вход в систему</h2>
           <p>Введите ваши учетные данные для доступа к логгеру</p>
         </div>
-        
+
         <form onSubmit={handleSubmit} className="login-form">
           <div className="input-group">
             <label htmlFor="login">Логин</label>
@@ -113,7 +179,7 @@ const LoginForm = ({ onLoginSuccess }) => {
               disabled={isLoading}
             />
           </div>
-          
+
           <div className="input-group">
             <label htmlFor="password">Пароль</label>
             <input
@@ -127,23 +193,15 @@ const LoginForm = ({ onLoginSuccess }) => {
               disabled={isLoading}
             />
           </div>
-          
-          {error && (
-            <div className="error-message">
-              {error}
-            </div>
-          )}
-          
-          <button 
-            type="submit" 
+
+          {error && <div className="error-message">{error}</div>}
+
+          <button
+            type="submit"
             className={`login-button ${isLoading ? 'loading' : ''}`}
             disabled={isLoading}
           >
-            {isLoading ? (
-              <div className="login-spinner"></div>
-            ) : (
-              'Войти'
-            )}
+            {isLoading ? <div className="login-spinner" /> : 'Войти'}
           </button>
         </form>
       </div>

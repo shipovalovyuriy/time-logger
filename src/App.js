@@ -4,28 +4,184 @@ import TimeLogger from './components/TimeLogger';
 import LoginForm from './components/LoginForm';
 import storage from './utils/storage';
 
+const API_BASE = 'https://test.newpulse.pkz.icdc.io';
+
+const toBearerToken = (token) => {
+  const raw = String(token || '').trim();
+  if (!raw) return '';
+  if (raw.toLowerCase().startsWith('bearer ')) {
+    return raw;
+  }
+  return `Bearer ${raw}`;
+};
+
+const toPositiveInt = (value) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+  return Math.trunc(parsed);
+};
+
+const extractMemberId = (payload) => {
+  const result =
+    payload && typeof payload === 'object' && !Array.isArray(payload) && 'result' in payload
+      ? payload.result
+      : payload;
+
+  const candidates = [
+    payload?.id,
+    payload?.member_id,
+    payload?.user_id,
+    payload?.value?.id,
+    payload?.result?.id,
+    payload?.result?.value?.id,
+    result?.id,
+    result?.member_id,
+    result?.user_id,
+    result?.value?.id
+  ];
+
+  for (let index = 0; index < candidates.length; index += 1) {
+    const parsed = toPositiveInt(candidates[index]);
+    if (parsed) {
+      return parsed;
+    }
+  }
+
+  return null;
+};
+
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isTelegramWebApp, setIsTelegramWebApp] = useState(false);
+  const [isAuthBootstrapping, setIsAuthBootstrapping] = useState(true);
 
   useEffect(() => {
-    console.log('App: Checking localStorage for token...');
-    const storageInfo = storage.getInfo();
-    console.log('App: Storage info:', storageInfo);
-    
-    const token = storage.getItem('token');
-    console.log('App: Found token in localStorage:', token ? 'YES' : 'NO');
-    
-    if (token) {
-      console.log('App: Token value:', token);
-      setIsAuthenticated(true);
-    } else {
-      console.log('App: No token found, user not authenticated');
-    }
-    
-    // Debug localStorage state
-    console.log('App: All localStorage keys:', storage.getKeys());
-    console.log('App: localStorage length:', storageInfo.length);
+    let isMounted = true;
+
+    const validateStoredToken = async (authToken) => {
+      const token = toBearerToken(authToken);
+      if (!token) {
+        return null;
+      }
+
+      try {
+        const response = await fetch(`${API_BASE}/auth-service/api/v1/check`, {
+          method: 'GET',
+          headers: {
+            Authorization: token,
+            'Content-Type': 'application/json'
+          }
+        });
+
+        if (!response.ok) {
+          return null;
+        }
+
+        const payload = await response.json().catch(() => null);
+        const memberId = extractMemberId(payload);
+
+        return {
+          token,
+          memberId
+        };
+      } catch {
+        return null;
+      }
+    };
+
+    const telegramLogin = async (telegramWebApp) => {
+      const initData = String(telegramWebApp?.initData || '').trim();
+      if (!initData) {
+        return null;
+      }
+
+      try {
+        const response = await fetch(`${API_BASE}/auth-service/api/v1/telegram/login`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            init_data: initData
+          })
+        });
+
+        if (!response.ok) {
+          return null;
+        }
+
+        const payload = await response.json().catch(() => null);
+        const rawToken = payload?.message || payload?.token || payload?.result?.message || '';
+        const bearerToken = toBearerToken(rawToken);
+        if (!bearerToken) {
+          return null;
+        }
+
+        const memberId = extractMemberId(payload);
+        return {
+          token: bearerToken,
+          memberId
+        };
+      } catch {
+        return null;
+      }
+    };
+
+    const bootstrapAuth = async () => {
+      const storedToken = storage.getItem('token');
+      if (storedToken) {
+        const validSession = await validateStoredToken(storedToken);
+        if (validSession) {
+          storage.setItem('token', validSession.token);
+          if (validSession.memberId) {
+            storage.setItem('userId', String(validSession.memberId));
+          }
+
+          if (isMounted) {
+            setIsAuthenticated(true);
+            setIsAuthBootstrapping(false);
+          }
+          return;
+        }
+
+        storage.removeItem('token');
+        storage.removeItem('userId');
+      }
+
+      const telegramWebApp = window.Telegram?.WebApp;
+      if (telegramWebApp) {
+        const telegramSession = await telegramLogin(telegramWebApp);
+        if (telegramSession?.token) {
+          storage.setItem('token', telegramSession.token);
+          if (telegramSession.memberId) {
+            storage.setItem('userId', String(telegramSession.memberId));
+          } else {
+            const recheckedSession = await validateStoredToken(telegramSession.token);
+            if (recheckedSession?.memberId) {
+              storage.setItem('userId', String(recheckedSession.memberId));
+            }
+          }
+
+          if (isMounted) {
+            setIsAuthenticated(true);
+            setIsAuthBootstrapping(false);
+          }
+          return;
+        }
+      }
+
+      if (isMounted) {
+        setIsAuthBootstrapping(false);
+      }
+    };
+
+    bootstrapAuth();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -133,6 +289,7 @@ function App() {
 
   const handleLoginSuccess = () => {
     setIsAuthenticated(true);
+    setIsAuthBootstrapping(false);
   };
 
   const handleLogout = () => {
@@ -143,7 +300,11 @@ function App() {
 
   return (
     <div className={`App ${isTelegramWebApp ? 'telegram-app' : ''}`}>
-      {isAuthenticated ? (
+      {isAuthBootstrapping ? (
+        <div className="auth-bootstrap">
+          <div className="auth-bootstrap__spinner" aria-hidden="true" />
+        </div>
+      ) : isAuthenticated ? (
         <>
           <div className="app-toolbar">
             <button type="button" className="logout-button" onClick={handleLogout} aria-label="Выйти">

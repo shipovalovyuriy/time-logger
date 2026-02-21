@@ -47,6 +47,31 @@
   min-height: 0;
 }
 
+.auth-bootstrap {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+}
+
+.auth-bootstrap__spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid rgba(255, 255, 255, 0.26);
+  border-top-color: var(--tg-button-color, #2ea6ff);
+  border-radius: 999px;
+  animation: app-bootstrap-spin 0.8s linear infinite;
+}
+
+@keyframes app-bootstrap-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .logout-button svg {
   width: 18px;
   height: 18px;

@@ -158,18 +158,39 @@ const getErrorMessageFromPayload = (payload) => {
   );
 };
 
+const normalizeBearerToken = (tokenValue) => {
+  const raw = String(tokenValue || '').trim();
+  if (!raw) {
+    return '';
+  }
+  if (raw.toLowerCase().startsWith('bearer ')) {
+    return raw;
+  }
+  return `Bearer ${raw}`;
+};
+
+const createAuthExpiredError = (statusCode) => {
+  const error = new Error('Сессия истекла. Пожалуйста, войдите снова.');
+  error.status = statusCode;
+  error.code = 'AUTH_EXPIRED';
+  error.isAuthError = true;
+  return error;
+};
+
 const requestJson = async (url, options, fallbackMessage) => {
   const response = await fetch(url, options);
   const payload = await response.json().catch(() => null);
 
   if (response.status === 401 || response.status === 403) {
     storage.removeItem('token');
-    throw new Error('Сессия истекла. Пожалуйста, войдите снова.');
+    throw createAuthExpiredError(response.status);
   }
 
   if (!response.ok) {
     const apiMessage = getErrorMessageFromPayload(payload);
-    throw new Error(apiMessage || `${fallbackMessage} (${response.status})`);
+    const error = new Error(apiMessage || `${fallbackMessage} (${response.status})`);
+    error.status = response.status;
+    throw error;
   }
 
   return payload;
@@ -493,85 +514,6 @@ const toPositiveInt = (value) => {
   return Math.trunc(number);
 };
 
-const parseMemberIdFromText = (value) => {
-  if (value === null || value === undefined) {
-    return null;
-  }
-
-  const raw = String(value).trim();
-  if (!raw) {
-    return null;
-  }
-
-  const decoded = (() => {
-    try {
-      return decodeURIComponent(raw);
-    } catch {
-      return raw;
-    }
-  })();
-
-  const direct = toPositiveInt(decoded);
-  if (direct) {
-    return direct;
-  }
-
-  const explicitMatch = decoded.match(
-    /(?:^|[?&;,:\s])(member_id|user_id|userid|uid)\s*=\s*(\d{1,12})(?:$|[?&;,:\s])/i
-  );
-  if (explicitMatch?.[2]) {
-    return toPositiveInt(explicitMatch[2]);
-  }
-
-  return null;
-};
-
-const getQueryMemberId = () => {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-
-  const params = new URLSearchParams(window.location.search);
-  const candidates = [
-    params.get('member_id'),
-    params.get('user_id'),
-    params.get('userId'),
-    params.get('uid'),
-    params.get('tgWebAppStartParam')
-  ];
-
-  for (let index = 0; index < candidates.length; index += 1) {
-    const parsed = parseMemberIdFromText(candidates[index]);
-    if (parsed) {
-      return parsed;
-    }
-  }
-
-  return null;
-};
-
-const getTelegramStartParamMemberId = () => {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-
-  const telegramWebApp = window.Telegram?.WebApp;
-  const fromUnsafe = parseMemberIdFromText(telegramWebApp?.initDataUnsafe?.start_param);
-  if (fromUnsafe) {
-    return fromUnsafe;
-  }
-
-  const fromSearch = parseMemberIdFromText(
-    new URLSearchParams(window.location.search).get('tgWebAppStartParam')
-  );
-  if (fromSearch) {
-    return fromSearch;
-  }
-
-  const initDataParams = new URLSearchParams(String(telegramWebApp?.initData || ''));
-  return parseMemberIdFromText(initDataParams.get('start_param'));
-};
-
 const getTelegramUserId = () => {
   const userId = Number(window.Telegram?.WebApp?.initDataUnsafe?.user?.id || 0);
   return Number.isFinite(userId) && userId > 0 ? userId : null;
@@ -614,18 +556,6 @@ const resolveMemberId = async (authToken) => {
   const fromStorage = toPositiveInt(storage.getItem('userId'));
   if (fromStorage) {
     return fromStorage;
-  }
-
-  const fromQuery = getQueryMemberId();
-  if (fromQuery) {
-    storage.setItem('userId', String(fromQuery));
-    return fromQuery;
-  }
-
-  const fromStartParam = getTelegramStartParamMemberId();
-  if (fromStartParam) {
-    storage.setItem('userId', String(fromStartParam));
-    return fromStartParam;
   }
 
   const fromSession = await fetchSessionMemberId(authToken);
@@ -1030,6 +960,113 @@ const TimeLogger = () => {
     [memberId]
   );
 
+  const silentTelegramLogin = useCallback(async () => {
+    const initData = String(telegramWebApp?.initData || '').trim();
+    if (!initData) {
+      return null;
+    }
+
+    try {
+      const payload = await requestJson(
+        `${API_BASE}/auth-service/api/v1/telegram/login`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            init_data: initData
+          })
+        },
+        'Не удалось авторизоваться через Telegram'
+      );
+
+      const result = extractResult(payload);
+      const tokenFromPayload =
+        payload?.message ||
+        payload?.token ||
+        result?.message ||
+        result?.token ||
+        '';
+      const bearerToken = normalizeBearerToken(tokenFromPayload);
+      if (!bearerToken) {
+        return null;
+      }
+
+      storage.setItem('token', bearerToken);
+
+      const memberFromPayload = toPositiveInt(
+        payload?.id ||
+          payload?.value?.id ||
+          payload?.member_id ||
+          result?.id ||
+          result?.value?.id ||
+          result?.member_id
+      );
+
+      let resolvedMemberId = memberFromPayload;
+      if (!resolvedMemberId) {
+        resolvedMemberId = await fetchSessionMemberId(bearerToken);
+      }
+
+      if (resolvedMemberId) {
+        storage.setItem('userId', String(resolvedMemberId));
+        setMemberId(resolvedMemberId);
+      }
+
+      return bearerToken;
+    } catch {
+      return null;
+    }
+  }, [telegramWebApp]);
+
+  const ensureAuthToken = useCallback(async () => {
+    const existingToken = normalizeBearerToken(storage.getItem('token'));
+    if (existingToken) {
+      return existingToken;
+    }
+
+    return silentTelegramLogin();
+  }, [silentTelegramLogin]);
+
+  const resolveActiveSession = useCallback(async () => {
+    let authToken = await ensureAuthToken();
+    if (!authToken) {
+      return null;
+    }
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const resolvedMemberID = await ensureMemberId(authToken);
+        if (resolvedMemberID) {
+          return {
+            token: authToken,
+            memberId: resolvedMemberID
+          };
+        }
+      } catch (error) {
+        if (error?.isAuthError && attempt === 0) {
+          const renewedToken = await silentTelegramLogin();
+          if (renewedToken) {
+            authToken = renewedToken;
+            continue;
+          }
+        }
+        throw error;
+      }
+
+      if (attempt === 0) {
+        const renewedToken = await silentTelegramLogin();
+        if (renewedToken) {
+          authToken = renewedToken;
+          continue;
+        }
+      }
+    }
+
+    return null;
+  }, [ensureAuthToken, ensureMemberId, silentTelegramLogin]);
+
   const applySegmentData = useCallback((segmentEntry) => {
     if (!segmentEntry) return;
 
@@ -1040,17 +1077,20 @@ const TimeLogger = () => {
   }, []);
 
   const loadMonthData = useCallback(async () => {
-    const authToken = storage.getItem('token');
+    let session = null;
+    try {
+      session = await resolveActiveSession();
+    } catch (sessionError) {
+      setError(sessionError.message || 'Не удалось авторизоваться. Выполните вход в приложении.');
+      return;
+    }
 
-    if (!authToken) {
-      setError('Токен авторизации не найден. Пожалуйста, войдите в систему.');
+    if (!session?.token || !session?.memberId) {
+      setError('Не удалось авторизоваться. Выполните вход в приложении.');
       return;
     }
-    const resolvedMemberId = await ensureMemberId(authToken);
-    if (!resolvedMemberId) {
-      setError('Не удалось определить пользователя. Нужен member_id в сессии/start_param.');
-      return;
-    }
+    let authToken = session.token;
+    let resolvedMemberId = session.memberId;
 
     const requestId = loadRequestRef.current + 1;
     loadRequestRef.current = requestId;
@@ -1058,10 +1098,10 @@ const TimeLogger = () => {
     setIsLoading(true);
     setError(null);
 
-    try {
+    const runLoad = async (token, currentMemberID) => {
       const [fetchedProjects, fetchedActivityTypes] = await Promise.all([
-        fetchProjects(authToken, resolvedMemberId, monthStart, monthEnd),
-        fetchActivityTypes(authToken)
+        fetchProjects(token, currentMemberID, monthStart, monthEnd),
+        fetchActivityTypes(token)
       ]);
 
       const projectIds = fetchedProjects.map((project) => project.id);
@@ -1069,15 +1109,15 @@ const TimeLogger = () => {
         monthSegments.map(async (segment) => {
           const [rangeRows, weeklyDistribution] = await Promise.all([
             fetchRangeLite(
-              authToken,
-              resolvedMemberId,
+              token,
+              currentMemberID,
               projectIds,
               segment.weekStart,
               segment.weekEnd
             ),
             fetchWeeklyActivityDistribution(
-              authToken,
-              resolvedMemberId,
+              token,
+              currentMemberID,
               segment.weekStart,
               segment.weekEnd
             )
@@ -1141,7 +1181,39 @@ const TimeLogger = () => {
       setIsSubmitted(false);
       setStep(1);
       previousWeekKeyRef.current = weekKey;
-    } catch (loadError) {
+    };
+
+    let loadError = null;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        await runLoad(authToken, resolvedMemberId);
+        loadError = null;
+        break;
+      } catch (error) {
+        if (loadRequestRef.current !== requestId) {
+          return;
+        }
+
+        if (error?.isAuthError && attempt === 0) {
+          const renewedToken = await silentTelegramLogin();
+          if (renewedToken) {
+            authToken = renewedToken;
+            const renewedMemberID = await ensureMemberId(renewedToken);
+            if (renewedMemberID) {
+              resolvedMemberId = renewedMemberID;
+              continue;
+            }
+            loadError = new Error('Не удалось определить пользователя в текущей сессии.');
+            break;
+          }
+        }
+
+        loadError = error;
+        break;
+      }
+    }
+
+    if (loadError) {
       if (loadRequestRef.current !== requestId) {
         return;
       }
@@ -1154,12 +1226,21 @@ const TimeLogger = () => {
       setInitialActivityPercentByCode({});
       setSegmentDataByKey({});
       setSegmentSummaryByKey({});
-    } finally {
-      if (loadRequestRef.current === requestId) {
-        setIsLoading(false);
-      }
     }
-  }, [applySegmentData, ensureMemberId, monthEnd, monthSegments, monthStart, weekKey]);
+
+    if (loadRequestRef.current === requestId) {
+      setIsLoading(false);
+    }
+  }, [
+    applySegmentData,
+    resolveActiveSession,
+    ensureMemberId,
+    silentTelegramLogin,
+    monthEnd,
+    monthSegments,
+    monthStart,
+    weekKey
+  ]);
 
   useEffect(() => {
     loadMonthData();
@@ -1373,17 +1454,20 @@ const TimeLogger = () => {
   );
 
   const handleSubmit = useCallback(async () => {
-    const authToken = storage.getItem('token');
+    let session = null;
+    try {
+      session = await resolveActiveSession();
+    } catch (sessionError) {
+      setError(sessionError.message || 'Не удалось авторизоваться. Выполните вход в приложении.');
+      return;
+    }
 
-    if (!authToken) {
-      setError('Токен авторизации не найден. Пожалуйста, войдите в систему.');
+    if (!session?.token || !session?.memberId) {
+      setError('Не удалось авторизоваться. Выполните вход в приложении.');
       return;
     }
-    const resolvedMemberId = await ensureMemberId(authToken);
-    if (!resolvedMemberId) {
-      setError('Не удалось определить пользователя. Нужен member_id в сессии/start_param.');
-      return;
-    }
+    let authToken = session.token;
+    let resolvedMemberId = session.memberId;
 
     if (!isPeriodComplete) {
       setError('Оба шага должны быть заполнены ровно до 100%.');
@@ -1417,24 +1501,54 @@ const TimeLogger = () => {
         throw new Error('Распределение активностей должно быть равно 100%');
       }
 
-      await requestJson(
-        `${API_BASE}/project-service/api/v1/timesheet/weekly-workload`,
-        {
-          method: 'PUT',
-          headers: {
-            Authorization: authToken,
-            'Content-Type': 'application/json'
+      const runSave = (token, memberID) =>
+        requestJson(
+          `${API_BASE}/project-service/api/v1/timesheet/weekly-workload`,
+          {
+            method: 'PUT',
+            headers: {
+              Authorization: token,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              member_id: memberID,
+              week_start: formatDateKey(weekStart),
+              week_end: formatDateKey(weekEnd),
+              project_facts: projectFacts,
+              activity_distribution: activityDistribution
+            })
           },
-          body: JSON.stringify({
-            member_id: resolvedMemberId,
-            week_start: formatDateKey(weekStart),
-            week_end: formatDateKey(weekEnd),
-            project_facts: projectFacts,
-            activity_distribution: activityDistribution
-          })
-        },
-        'Не удалось сохранить weekly распределение'
-      );
+          'Не удалось сохранить weekly распределение'
+        );
+
+      let submitError = null;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          await runSave(authToken, resolvedMemberId);
+          submitError = null;
+          break;
+        } catch (error) {
+          if (error?.isAuthError && attempt === 0) {
+            const renewedToken = await silentTelegramLogin();
+            if (renewedToken) {
+              authToken = renewedToken;
+              const renewedMemberID = await ensureMemberId(renewedToken);
+              if (renewedMemberID) {
+                resolvedMemberId = renewedMemberID;
+                continue;
+              }
+              submitError = new Error('Не удалось определить пользователя в текущей сессии.');
+              break;
+            }
+          }
+          submitError = error;
+          break;
+        }
+      }
+
+      if (submitError) {
+        throw submitError;
+      }
 
       if (window.Telegram?.WebApp) {
         window.Telegram.WebApp.sendData(
@@ -1505,7 +1619,9 @@ const TimeLogger = () => {
     weekEnd,
     weekStart,
     weekKey,
-    ensureMemberId
+    resolveActiveSession,
+    ensureMemberId,
+    silentTelegramLogin
   ]);
 
   useEffect(() => {
