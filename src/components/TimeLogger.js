@@ -117,6 +117,9 @@ const buildMonthSegments = (monthDate) => {
   });
 };
 
+const isSegmentElapsed = (segment, todayStart) =>
+  Boolean(segment) && segment.weekEnd.getTime() < todayStart.getTime();
+
 const resolveActiveSegmentIndex = (segments, activeDate) => {
   const activeKey = formatDateKey(activeDate);
 
@@ -764,7 +767,17 @@ const TimeLogger = () => {
     () => resolveActiveSegmentIndex(monthSegments, activeDate),
     [activeDate, monthSegments]
   );
+  const latestElapsedSegment = useMemo(() => {
+    for (let index = monthSegments.length - 1; index >= 0; index -= 1) {
+      if (isSegmentElapsed(monthSegments[index], todayStart)) {
+        return monthSegments[index];
+      }
+    }
+    return null;
+  }, [monthSegments, todayStart]);
   const activeSegment = monthSegments[activeSegmentIndex] || monthSegments[0] || null;
+  const activeSegmentIsElapsed = isSegmentElapsed(activeSegment, todayStart);
+  const activeSegmentPendingRelease = !activeSegmentIsElapsed;
   const weekStart = activeSegment?.weekStart || monthStart;
   const weekEnd = activeSegment?.weekEnd || monthEnd;
   const weekKey = useMemo(() => getSegmentKey(weekStart, weekEnd), [weekEnd, weekStart]);
@@ -791,7 +804,8 @@ const TimeLogger = () => {
   const isProjectComplete = projectTotalPercent === MAX_TOTAL_PERCENT;
   const isActivityComplete = activityTotalPercent === MAX_TOTAL_PERCENT;
   const isPeriodComplete = isProjectComplete && isActivityComplete;
-  const canGoToStep2 = !isLoading && !error && projects.length > 0 && isProjectComplete;
+  const canGoToStep2 =
+    activeSegmentIsElapsed && !isLoading && !error && projects.length > 0 && isProjectComplete;
 
   const isDirty = useMemo(() => {
     if (!projectKeys.length && !activityKeys.length) {
@@ -844,6 +858,20 @@ const TimeLogger = () => {
       setActiveDate(todayStart);
     }
   }, [activeDate, todayStart]);
+
+  useEffect(() => {
+    if (!latestElapsedSegment) {
+      return;
+    }
+    if (activeSegmentIsElapsed) {
+      return;
+    }
+    if (activeSegment?.id === latestElapsedSegment.id) {
+      return;
+    }
+
+    setActiveDate(startOfDay(latestElapsedSegment.weekStart));
+  }, [activeSegment?.id, activeSegmentIsElapsed, latestElapsedSegment]);
 
   useEffect(() => {
     const previousTotals = previousTotalsRef.current;
@@ -1364,7 +1392,7 @@ const TimeLogger = () => {
 
   const handleTrackPointerDown = useCallback(
     (scope, key, event) => {
-      if (activeSegmentIsLocked || isLoading || isSaving) {
+      if (activeSegmentPendingRelease || activeSegmentIsLocked || isLoading || isSaving) {
         return;
       }
 
@@ -1408,6 +1436,7 @@ const TimeLogger = () => {
       updatePercentValue(scope, key, nextPercent);
     },
     [
+      activeSegmentPendingRelease,
       activeSegmentIsLocked,
       isLoading,
       isSaving,
@@ -1419,7 +1448,7 @@ const TimeLogger = () => {
 
   const handleTrackPointerMove = useCallback(
     (scope, key, event) => {
-      if (activeSegmentIsLocked) {
+      if (activeSegmentPendingRelease || activeSegmentIsLocked) {
         return;
       }
       if (!paintRef.current.active) {
@@ -1438,7 +1467,12 @@ const TimeLogger = () => {
       const nextPercent = resolvePercentFromPointer(event);
       updatePercentValue(scope, key, nextPercent);
     },
-    [activeSegmentIsLocked, resolvePercentFromPointer, updatePercentValue]
+    [
+      activeSegmentPendingRelease,
+      activeSegmentIsLocked,
+      resolvePercentFromPointer,
+      updatePercentValue
+    ]
   );
 
   const handleTrackPointerEnd = useCallback((event) => {
@@ -1468,7 +1502,7 @@ const TimeLogger = () => {
   const selectSegment = useCallback(
     (segment) => {
       if (!segment) return;
-      if (segment.weekStart.getTime() > todayStart.getTime()) return;
+      if (!isSegmentElapsed(segment, todayStart)) return;
       if (segment.id === activeSegment?.id) return;
       if (!confirmRangeSwitch()) return;
 
@@ -1495,6 +1529,10 @@ const TimeLogger = () => {
 
     if (!isPeriodComplete) {
       setError('Оба шага должны быть заполнены ровно до 100%.');
+      return;
+    }
+    if (activeSegmentPendingRelease) {
+      setError('Отрезок еще не завершен. Сохранение станет доступно после окончания отрезка.');
       return;
     }
     if (activeSegmentIsLocked) {
@@ -1640,6 +1678,7 @@ const TimeLogger = () => {
   }, [
     activityPercentByCode,
     activityTotalPercent,
+    activeSegmentPendingRelease,
     activeSegmentIsLocked,
     activityTypes,
     isPeriodComplete,
@@ -1728,6 +1767,7 @@ const TimeLogger = () => {
       }
 
       const canSave =
+        !activeSegmentPendingRelease &&
         !activeSegmentIsLocked &&
         !isSaving &&
         !isLoading &&
@@ -1751,6 +1791,7 @@ const TimeLogger = () => {
       telegramWebApp.offEvent('backButtonClicked', onBackButtonClick);
     };
   }, [
+    activeSegmentPendingRelease,
     activeSegmentIsLocked,
     canGoToStep2,
     error,
@@ -1782,6 +1823,12 @@ const TimeLogger = () => {
     infoText = error;
     infoTone = 'danger';
     showInfoRetry = true;
+  } else if (activeSegmentPendingRelease) {
+    const nextDay = activeSegment ? addDays(activeSegment.weekEnd, 1) : null;
+    infoText = nextDay
+      ? `Отрезок станет доступен с ${formatShortDate(nextDay)}.`
+      : 'Отрезок станет доступен после окончания периода.';
+    infoTone = 'info';
   } else if (activeSegmentIsLocked) {
     infoText = 'Отрезок подтвержден в Pulse и доступен только для просмотра.';
     infoTone = 'info';
@@ -1823,7 +1870,7 @@ const TimeLogger = () => {
 
       <div className="segments-bar" role="tablist" aria-label="Недельные отрезки">
         {monthSegments.map((segment) => {
-          const isFuture = segment.weekStart.getTime() > todayStart.getTime();
+          const isPendingRelease = !isSegmentElapsed(segment, todayStart);
           const isActive = activeSegment?.id === segment.id;
           const summaryKey = `${formatDateKey(segment.weekStart)}_${formatDateKey(segment.weekEnd)}`;
           const summary = segmentSummaryByKey[summaryKey];
@@ -1837,7 +1884,7 @@ const TimeLogger = () => {
               type="button"
               className={`segment-chip ${isActive ? 'active' : ''} ${isDone ? 'done' : ''}`}
               onClick={() => selectSegment(segment)}
-              disabled={isFuture || isLoading || isSaving}
+              disabled={isPendingRelease || isLoading || isSaving}
             >
               <span className="segment-chip__label">{segment.label}</span>
               <span className="segment-chip__meta">
@@ -1963,7 +2010,13 @@ const TimeLogger = () => {
                   type="button"
                   className={`primary-button ${isSubmitted ? 'submitted' : ''}`}
                   onClick={handleSubmit}
-                  disabled={activeSegmentIsLocked || isSaving || !isPeriodComplete || projects.length === 0}
+                  disabled={
+                    activeSegmentPendingRelease ||
+                    activeSegmentIsLocked ||
+                    isSaving ||
+                    !isPeriodComplete ||
+                    projects.length === 0
+                  }
                 >
                   {isSaving ? 'Сохраняем...' : isSubmitted ? 'Сохранено' : 'Сохранить'}
                 </button>
