@@ -424,6 +424,11 @@ html[data-tg-color-scheme='light'] .segment-chip.active {
   cursor: ew-resize;
 }
 
+.segment-strip.locked {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
 .segment-strip__fill {
   position: absolute;
   top: 0;

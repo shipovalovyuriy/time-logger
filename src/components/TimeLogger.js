@@ -487,6 +487,7 @@ const buildSegmentDataEntry = ({
   activityTypes,
   rangeRows,
   weeklyDistribution,
+  isLocked,
   rangeStart,
   rangeEnd
 }) => {
@@ -499,7 +500,8 @@ const buildSegmentDataEntry = ({
     projectPercents,
     activityPercents,
     projectTotal,
-    activityTotal
+    activityTotal,
+    isLocked: Boolean(isLocked)
   };
 };
 
@@ -706,12 +708,18 @@ const fetchWeeklyActivityDistribution = async (authToken, memberId, rangeStart, 
 
   const result = extractResult(payload);
   if (!result || typeof result !== 'object') {
-    return [];
+    return {
+      activityDistribution: [],
+      isLocked: false
+    };
   }
 
-  return Array.isArray(result?.activity_distribution)
-    ? result.activity_distribution
-    : [];
+  return {
+    activityDistribution: Array.isArray(result?.activity_distribution)
+      ? result.activity_distribution
+      : [],
+    isLocked: Boolean(result?.is_locked)
+  };
 };
 
 const TimeLogger = () => {
@@ -760,6 +768,7 @@ const TimeLogger = () => {
   const weekStart = activeSegment?.weekStart || monthStart;
   const weekEnd = activeSegment?.weekEnd || monthEnd;
   const weekKey = useMemo(() => getSegmentKey(weekStart, weekEnd), [weekEnd, weekStart]);
+  const activeSegmentIsLocked = Boolean(segmentDataByKey[weekKey]?.isLocked);
 
   const projectTotalPercent = useMemo(
     () => sumPercentMap(projectPercentById),
@@ -1107,7 +1116,7 @@ const TimeLogger = () => {
       const projectIds = fetchedProjects.map((project) => project.id);
       const segmentPayloads = await Promise.all(
         monthSegments.map(async (segment) => {
-          const [rangeRows, weeklyDistribution] = await Promise.all([
+          const [rangeRows, weeklyWorkload] = await Promise.all([
             fetchRangeLite(
               token,
               currentMemberID,
@@ -1128,7 +1137,8 @@ const TimeLogger = () => {
             projects: fetchedProjects,
             activityTypes: fetchedActivityTypes,
             rangeRows,
-            weeklyDistribution,
+            weeklyDistribution: weeklyWorkload.activityDistribution,
+            isLocked: weeklyWorkload.isLocked,
             rangeStart: segment.weekStart,
             rangeEnd: segment.weekEnd
           });
@@ -1354,6 +1364,10 @@ const TimeLogger = () => {
 
   const handleTrackPointerDown = useCallback(
     (scope, key, event) => {
+      if (activeSegmentIsLocked || isLoading || isSaving) {
+        return;
+      }
+
       if (event.pointerType === 'mouse') {
         event.preventDefault();
       }
@@ -1393,11 +1407,21 @@ const TimeLogger = () => {
 
       updatePercentValue(scope, key, nextPercent);
     },
-    [resolvePercentFromPointer, setRowToAvailableMax, updatePercentValue]
+    [
+      activeSegmentIsLocked,
+      isLoading,
+      isSaving,
+      resolvePercentFromPointer,
+      setRowToAvailableMax,
+      updatePercentValue
+    ]
   );
 
   const handleTrackPointerMove = useCallback(
     (scope, key, event) => {
+      if (activeSegmentIsLocked) {
+        return;
+      }
       if (!paintRef.current.active) {
         return;
       }
@@ -1414,7 +1438,7 @@ const TimeLogger = () => {
       const nextPercent = resolvePercentFromPointer(event);
       updatePercentValue(scope, key, nextPercent);
     },
-    [resolvePercentFromPointer, updatePercentValue]
+    [activeSegmentIsLocked, resolvePercentFromPointer, updatePercentValue]
   );
 
   const handleTrackPointerEnd = useCallback((event) => {
@@ -1471,6 +1495,10 @@ const TimeLogger = () => {
 
     if (!isPeriodComplete) {
       setError('Оба шага должны быть заполнены ровно до 100%.');
+      return;
+    }
+    if (activeSegmentIsLocked) {
+      setError('Отрезок подтвержден в Pulse и недоступен для редактирования.');
       return;
     }
 
@@ -1578,7 +1606,8 @@ const TimeLogger = () => {
           projectPercents: { ...projectPercentById },
           activityPercents: { ...activityPercentByCode },
           projectTotal: projectTotalPercent,
-          activityTotal: activityTotalPercent
+          activityTotal: activityTotalPercent,
+          isLocked: false
         }
       }));
       setSegmentSummaryByKey((prev) => ({
@@ -1611,6 +1640,7 @@ const TimeLogger = () => {
   }, [
     activityPercentByCode,
     activityTotalPercent,
+    activeSegmentIsLocked,
     activityTypes,
     isPeriodComplete,
     projectPercentById,
@@ -1697,7 +1727,13 @@ const TimeLogger = () => {
         return;
       }
 
-      const canSave = !isSaving && !isLoading && !error && isPeriodComplete && projects.length > 0;
+      const canSave =
+        !activeSegmentIsLocked &&
+        !isSaving &&
+        !isLoading &&
+        !error &&
+        isPeriodComplete &&
+        projects.length > 0;
       applyMainButtonState(
         canSave,
         isSaving ? 'Сохраняем...' : isSubmitted ? 'Сохранено' : 'Сохранить'
@@ -1715,6 +1751,7 @@ const TimeLogger = () => {
       telegramWebApp.offEvent('backButtonClicked', onBackButtonClick);
     };
   }, [
+    activeSegmentIsLocked,
     canGoToStep2,
     error,
     handleSubmit,
@@ -1745,6 +1782,9 @@ const TimeLogger = () => {
     infoText = error;
     infoTone = 'danger';
     showInfoRetry = true;
+  } else if (activeSegmentIsLocked) {
+    infoText = 'Отрезок подтвержден в Pulse и доступен только для просмотра.';
+    infoTone = 'info';
   } else if (isSaving) {
     infoText = 'Сохраняем отрезок...';
     infoTone = 'info';
@@ -1836,11 +1876,12 @@ const TimeLogger = () => {
                 return (
                   <div key={row.id} className="project-card">
                     <div
-                      className="segment-strip"
+                      className={`segment-strip ${activeSegmentIsLocked ? 'locked' : ''}`}
                       role="slider"
                       aria-valuemin={0}
                       aria-valuemax={100}
                       aria-valuenow={rowPercent}
+                      aria-disabled={activeSegmentIsLocked}
                       style={{
                         borderColor: `${row.color}88`,
                         backgroundColor: `${row.color}22`
@@ -1922,7 +1963,7 @@ const TimeLogger = () => {
                   type="button"
                   className={`primary-button ${isSubmitted ? 'submitted' : ''}`}
                   onClick={handleSubmit}
-                  disabled={isSaving || !isPeriodComplete || projects.length === 0}
+                  disabled={activeSegmentIsLocked || isSaving || !isPeriodComplete || projects.length === 0}
                 >
                   {isSaving ? 'Сохраняем...' : isSubmitted ? 'Сохранено' : 'Сохранить'}
                 </button>
