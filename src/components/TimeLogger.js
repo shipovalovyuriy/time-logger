@@ -557,6 +557,41 @@ const fetchSessionMemberId = async (authToken) => {
   return null;
 };
 
+const extractTimesheetMode = (payload) => {
+  const result = extractResult(payload);
+  const candidates = [
+    payload?.timesheet_mode,
+    payload?.timesheetMode,
+    result?.timesheet_mode,
+    result?.timesheetMode
+  ];
+
+  for (let index = 0; index < candidates.length; index += 1) {
+    const parsed = toPositiveInt(candidates[index]);
+    if (parsed) {
+      return parsed;
+    }
+  }
+
+  return null;
+};
+
+const fetchSessionTimesheetMode = async (authToken) => {
+  const payload = await requestJson(
+    `${API_BASE}/auth-service/api/v1/check`,
+    {
+      method: 'GET',
+      headers: {
+        Authorization: authToken,
+        'Content-Type': 'application/json'
+      }
+    },
+    'Не удалось получить данные текущей сессии'
+  );
+
+  return extractTimesheetMode(payload);
+};
+
 const resolveMemberId = async (authToken) => {
   const fromStorage = toPositiveInt(storage.getItem('userId'));
   if (fromStorage) {
@@ -732,6 +767,7 @@ const TimeLogger = () => {
   const todayStart = useMemo(() => startOfDay(new Date()), []);
   const [activeDate, setActiveDate] = useState(() => startOfDay(new Date()));
   const [step, setStep] = useState(1);
+  const [timesheetMode, setTimesheetMode] = useState(null);
 
   const [projects, setProjects] = useState([]);
   const [activityTypes, setActivityTypes] = useState(DEFAULT_ACTIVITY_TYPES);
@@ -1135,6 +1171,34 @@ const TimeLogger = () => {
     setIsLoading(true);
     setError(null);
 
+    try {
+      const resolvedMode = await fetchSessionTimesheetMode(authToken);
+      if (loadRequestRef.current !== requestId) {
+        return;
+      }
+      if (resolvedMode) {
+        setTimesheetMode(resolvedMode);
+      }
+      if (resolvedMode === 2) {
+        setIsLoading(false);
+        setProjects([]);
+        setActivityTypes(DEFAULT_ACTIVITY_TYPES);
+        setProjectPercentById({});
+        setInitialProjectPercentById({});
+        setActivityPercentByCode({});
+        setInitialActivityPercentByCode({});
+        setSegmentDataByKey({});
+        setSegmentSummaryByKey({});
+        setError('Ваш профиль настроен на учет часов. Quick Utilization доступен только в режиме процентов.');
+        return;
+      }
+    } catch (modeError) {
+      if (loadRequestRef.current !== requestId) {
+        return;
+      }
+      // ignore: old tokens may not contain timesheet_mode
+    }
+
     const runLoad = async (token, currentMemberID) => {
       const [fetchedProjects, fetchedActivityTypes] = await Promise.all([
         fetchProjects(token, currentMemberID, monthStart, monthEnd),
@@ -1229,6 +1293,24 @@ const TimeLogger = () => {
         break;
       } catch (error) {
         if (loadRequestRef.current !== requestId) {
+          return;
+        }
+
+        if (error?.status === 409) {
+          setTimesheetMode(2);
+          setIsLoading(false);
+          setProjects([]);
+          setActivityTypes(DEFAULT_ACTIVITY_TYPES);
+          setProjectPercentById({});
+          setInitialProjectPercentById({});
+          setActivityPercentByCode({});
+          setInitialActivityPercentByCode({});
+          setSegmentDataByKey({});
+          setSegmentSummaryByKey({});
+          setError(
+            error.message ||
+              'Ваш профиль настроен на учет часов. Quick Utilization доступен только в режиме процентов.'
+          );
           return;
         }
 
@@ -1841,6 +1923,18 @@ const TimeLogger = () => {
   } else if (isSubmitted) {
     infoText = 'Отрезок успешно сохранен';
     infoTone = 'success';
+  }
+
+  if (timesheetMode === 2) {
+    return (
+      <div className={`time-logger ${isTelegramWebApp ? 'telegram-mode' : ''}`}>
+        <section className="panel panel--list">
+          <div className="no-projects">
+            <p>Ваш профиль настроен на учет часов. Quick Utilization доступен только в режиме процентов.</p>
+          </div>
+        </section>
+      </div>
+    );
   }
 
   return (
