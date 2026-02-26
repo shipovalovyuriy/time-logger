@@ -1,5 +1,6 @@
 :root {
   --tg-viewport-height: 100vh;
+  --app-keyboard-inset: 0px;
   --tg-bg-color: #0f172a;
   --tg-secondary-bg-color: #17233a;
   --tg-text-color: #ffffff;

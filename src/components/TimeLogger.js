@@ -1070,6 +1070,37 @@ const TimeLogger = () => {
     setHoursNotice(null);
   }, [hoursSelectedDate, timesheetMode]);
 
+  useEffect(() => {
+    if (timesheetMode !== 2) {
+      return undefined;
+    }
+
+    const handleFocusIn = (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+
+      if (!target.closest('.hours-summary, .hours-form')) {
+        return;
+      }
+
+      window.setTimeout(() => {
+        target.scrollIntoView({
+          block: 'center',
+          inline: 'nearest',
+          behavior: 'smooth'
+        });
+      }, 180);
+    };
+
+    document.addEventListener('focusin', handleFocusIn);
+
+    return () => {
+      document.removeEventListener('focusin', handleFocusIn);
+    };
+  }, [timesheetMode]);
+
   const isProjectComplete = projectTotalPercent === MAX_TOTAL_PERCENT;
   const isActivityComplete = activityTotalPercent === MAX_TOTAL_PERCENT;
   const isPeriodComplete = isProjectComplete && isActivityComplete;
@@ -2567,7 +2598,7 @@ const TimeLogger = () => {
 
   if (timesheetMode === 2) {
     return (
-      <div className={`time-logger ${isTelegramWebApp ? 'telegram-mode' : ''}`}>
+      <div className={`time-logger hours-mode ${isTelegramWebApp ? 'telegram-mode' : ''}`}>
         <div className="panel hours-summary">
           <div className="hours-summary__top">
             <div className="hours-input-group">
@@ -2738,9 +2769,10 @@ const TimeLogger = () => {
                     <label htmlFor="hours-hours">Часы</label>
                     <input
                       id="hours-hours"
-                      type="number"
-                      min={0}
-                      step={1}
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      autoComplete="off"
                       value={String(hoursDraftEntry.hours)}
                       onChange={(event) =>
                         setHoursDraftEntry((prev) => ({

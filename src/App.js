@@ -187,18 +187,68 @@ function App() {
   useEffect(() => {
     const tg = window.Telegram?.WebApp;
     const root = document.documentElement;
+    const visualViewport = window.visualViewport;
 
-    const applyFallbackViewport = () => {
-      root.style.setProperty('--tg-viewport-height', `${window.innerHeight}px`);
+    const toPositiveHeight = (value) => {
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        return null;
+      }
+      return parsed;
     };
+
+    const resolveViewportHeight = (webApp) => {
+      const candidates = [
+        toPositiveHeight(webApp?.viewportHeight),
+        toPositiveHeight(visualViewport?.height),
+        toPositiveHeight(window.innerHeight)
+      ].filter((value) => value !== null);
+
+      if (!candidates.length) {
+        return 0;
+      }
+
+      return Math.round(Math.min(...candidates));
+    };
+
+    const resolveKeyboardInset = () => {
+      if (!visualViewport) {
+        return 0;
+      }
+
+      const inset = window.innerHeight - (visualViewport.height + visualViewport.offsetTop);
+      if (!Number.isFinite(inset) || inset <= 0) {
+        return 0;
+      }
+
+      return Math.round(inset);
+    };
+
+    const applyViewportVars = (webApp) => {
+      const height = resolveViewportHeight(webApp);
+      if (height > 0) {
+        root.style.setProperty('--tg-viewport-height', `${height}px`);
+      }
+
+      const keyboardInset = resolveKeyboardInset();
+      root.style.setProperty('--app-keyboard-inset', `${keyboardInset}px`);
+      root.dataset.keyboardOpen = keyboardInset > 0 ? 'true' : 'false';
+    };
+
+    const applyFallbackViewport = () => applyViewportVars(null);
 
     if (!tg) {
       setIsTelegramWebApp(false);
       applyFallbackViewport();
       window.addEventListener('resize', applyFallbackViewport);
+      visualViewport?.addEventListener('resize', applyFallbackViewport);
+      visualViewport?.addEventListener('scroll', applyFallbackViewport);
 
       return () => {
         window.removeEventListener('resize', applyFallbackViewport);
+        visualViewport?.removeEventListener('resize', applyFallbackViewport);
+        visualViewport?.removeEventListener('scroll', applyFallbackViewport);
+        root.dataset.keyboardOpen = 'false';
       };
     }
 
@@ -251,8 +301,7 @@ function App() {
     };
 
     const applyViewport = () => {
-      const height = Number(tg.viewportStableHeight || tg.viewportHeight || window.innerHeight);
-      root.style.setProperty('--tg-viewport-height', `${height}px`);
+      applyViewportVars(tg);
     };
 
     try {
@@ -279,11 +328,16 @@ function App() {
     tg.onEvent('themeChanged', applyTheme);
     tg.onEvent('viewportChanged', applyViewport);
     window.addEventListener('resize', applyViewport);
+    visualViewport?.addEventListener('resize', applyViewport);
+    visualViewport?.addEventListener('scroll', applyViewport);
 
     return () => {
       tg.offEvent('themeChanged', applyTheme);
       tg.offEvent('viewportChanged', applyViewport);
       window.removeEventListener('resize', applyViewport);
+      visualViewport?.removeEventListener('resize', applyViewport);
+      visualViewport?.removeEventListener('scroll', applyViewport);
+      root.dataset.keyboardOpen = 'false';
     };
   }, []);
 
