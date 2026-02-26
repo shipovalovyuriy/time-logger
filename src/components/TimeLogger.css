@@ -264,18 +264,41 @@ html[data-tg-color-scheme='light'] .segment-chip.active {
 }
 
 .step-description {
-  color: var(--tg-hint-color, #b6c2d9);
+  color: var(--tg-text-color, #ffffff);
   font-size: 12px;
-  line-height: 1.35;
-  border: 1px dashed rgba(255, 255, 255, 0.2);
-  border-radius: 10px;
-  padding: 8px 10px;
-  background: rgba(255, 255, 255, 0.04);
-  min-height: 54px;
+  line-height: 1.4;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgba(15, 23, 42, 0.56);
+  box-shadow: inset 3px 0 0 rgba(255, 255, 255, 0.16);
+  min-height: 58px;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
+}
+
+.step-description__main {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.step-description__icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  margin-top: 1px;
+  background: rgba(255, 255, 255, 0.14);
 }
 
 .step-description__text {
@@ -285,10 +308,10 @@ html[data-tg-color-scheme='light'] .segment-chip.active {
 
 .step-description__retry {
   border: 1px solid rgba(255, 255, 255, 0.26);
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.14);
   color: var(--tg-text-color, #ffffff);
   border-radius: 8px;
-  padding: 5px 9px;
+  padding: 6px 10px;
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
@@ -296,23 +319,33 @@ html[data-tg-color-scheme='light'] .segment-chip.active {
 }
 
 .step-description--neutral {
-  color: var(--tg-hint-color, #b6c2d9);
+  border-color: rgba(148, 163, 184, 0.42);
+  background: rgba(71, 85, 105, 0.26);
+  box-shadow: inset 3px 0 0 rgba(148, 163, 184, 0.7);
 }
 
 .step-description--info {
-  color: var(--tg-link-color, #5ac8fa);
+  border-color: rgba(90, 200, 250, 0.42);
+  background: rgba(34, 121, 168, 0.26);
+  box-shadow: inset 3px 0 0 rgba(90, 200, 250, 0.85);
 }
 
 .step-description--warning {
-  color: #ffd27d;
+  border-color: rgba(255, 210, 125, 0.5);
+  background: rgba(153, 113, 30, 0.28);
+  box-shadow: inset 3px 0 0 rgba(255, 210, 125, 0.9);
 }
 
 .step-description--success {
-  color: #8ef0bb;
+  border-color: rgba(142, 240, 187, 0.5);
+  background: rgba(39, 125, 90, 0.28);
+  box-shadow: inset 3px 0 0 rgba(142, 240, 187, 0.9);
 }
 
 .step-description--danger {
-  color: var(--tg-destructive-color, #ff6b6b);
+  border-color: rgba(255, 107, 107, 0.5);
+  background: rgba(146, 43, 43, 0.28);
+  box-shadow: inset 3px 0 0 rgba(255, 107, 107, 0.92);
 }
 
 .panel {
@@ -663,8 +696,9 @@ html[data-tg-color-scheme='light'] .segment-chip.active {
   align-items: flex-start;
   gap: 8px;
   border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 198, 109, 0.5);
+  background: rgba(150, 110, 34, 0.24);
+  box-shadow: inset 3px 0 0 rgba(255, 198, 109, 0.86);
   padding: 10px 12px;
   color: var(--tg-text-color, #ffffff);
   font-size: 12px;
@@ -680,7 +714,7 @@ html[data-tg-color-scheme='light'] .segment-chip.active {
 
 .hours-lock-banner__icon {
   flex-shrink: 0;
-  opacity: 0.9;
+  opacity: 1;
 }
 
 .hours-notice {
@@ -689,21 +723,42 @@ html[data-tg-color-scheme='light'] .segment-chip.active {
   font-size: 13px;
   font-weight: 650;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 8px;
+  line-height: 1.35;
 }
 
 .hours-notice--success {
-  border: 1px solid rgba(106, 228, 151, 0.55);
-  background: rgba(70, 179, 112, 0.16);
-  color: #a3f8c5;
+  border: 1px solid rgba(106, 228, 151, 0.6);
+  background: rgba(39, 125, 90, 0.32);
+  box-shadow: inset 3px 0 0 rgba(106, 228, 151, 0.9);
+  color: #d9ffe9;
 }
 
 .hours-notice--danger {
-  border: 1px solid rgba(255, 107, 107, 0.5);
-  background: rgba(255, 107, 107, 0.14);
-  color: var(--tg-destructive-color, #ff6b6b);
+  border: 1px solid rgba(255, 107, 107, 0.62);
+  background: rgba(146, 43, 43, 0.34);
+  box-shadow: inset 3px 0 0 rgba(255, 107, 107, 0.94);
+  color: #ffd7d7;
+}
+
+.hours-notice__icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  font-size: 11px;
+  line-height: 1;
+  margin-top: 1px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.hours-notice__text {
+  flex: 1;
+  min-width: 0;
 }
 
 .hours-tabs {
@@ -890,6 +945,65 @@ html[data-tg-color-scheme='light'] .hours-tab {
   border-color: rgba(15, 23, 42, 0.16);
   background: rgba(15, 23, 42, 0.06);
   color: rgba(15, 23, 42, 0.62);
+}
+
+html[data-tg-color-scheme='light'] .step-description {
+  color: #0f172a;
+}
+
+html[data-tg-color-scheme='light'] .step-description__retry {
+  border-color: rgba(15, 23, 42, 0.18);
+  background: rgba(255, 255, 255, 0.52);
+  color: #0f172a;
+}
+
+html[data-tg-color-scheme='light'] .step-description--neutral {
+  border-color: rgba(100, 116, 139, 0.38);
+  background: rgba(148, 163, 184, 0.24);
+  box-shadow: inset 3px 0 0 rgba(100, 116, 139, 0.7);
+}
+
+html[data-tg-color-scheme='light'] .step-description--info {
+  border-color: rgba(14, 116, 144, 0.35);
+  background: rgba(34, 197, 255, 0.22);
+  box-shadow: inset 3px 0 0 rgba(14, 116, 144, 0.8);
+}
+
+html[data-tg-color-scheme='light'] .step-description--warning {
+  border-color: rgba(202, 138, 4, 0.38);
+  background: rgba(250, 204, 21, 0.24);
+  box-shadow: inset 3px 0 0 rgba(202, 138, 4, 0.82);
+}
+
+html[data-tg-color-scheme='light'] .step-description--success {
+  border-color: rgba(22, 163, 74, 0.36);
+  background: rgba(134, 239, 172, 0.26);
+  box-shadow: inset 3px 0 0 rgba(22, 163, 74, 0.84);
+}
+
+html[data-tg-color-scheme='light'] .step-description--danger {
+  border-color: rgba(220, 38, 38, 0.38);
+  background: rgba(254, 202, 202, 0.45);
+  box-shadow: inset 3px 0 0 rgba(220, 38, 38, 0.84);
+}
+
+html[data-tg-color-scheme='light'] .hours-notice--success {
+  border-color: rgba(22, 163, 74, 0.35);
+  background: rgba(134, 239, 172, 0.3);
+  color: #14532d;
+}
+
+html[data-tg-color-scheme='light'] .hours-notice--danger {
+  border-color: rgba(220, 38, 38, 0.35);
+  background: rgba(254, 202, 202, 0.4);
+  color: #7f1d1d;
+}
+
+html[data-tg-color-scheme='light'] .hours-lock-banner {
+  border-color: rgba(202, 138, 4, 0.4);
+  background: rgba(250, 204, 21, 0.28);
+  box-shadow: inset 3px 0 0 rgba(202, 138, 4, 0.84);
+  color: #713f12;
 }
 
 html[data-tg-color-scheme='light'] .hours-badge {

@@ -2322,6 +2322,15 @@ const TimeLogger = () => {
     infoTone = 'success';
   }
 
+  const infoToneIconMap = {
+    neutral: 'ℹ️',
+    info: 'ℹ️',
+    warning: '⚠️',
+    success: '✅',
+    danger: '⛔'
+  };
+  const infoToneIcon = infoToneIconMap[infoTone] || infoToneIconMap.neutral;
+
   const hoursIsLoading = hoursIsCatalogLoading || hoursIsDayLoading;
   const hoursWorklogsCount =
     hoursDayEntries?.projects?.reduce(
@@ -2649,13 +2658,19 @@ const TimeLogger = () => {
 
           {hoursNotice && (
             <div className="hours-notice hours-notice--success" role="status">
-              {hoursNotice}
+              <span className="hours-notice__icon" aria-hidden="true">
+                ✅
+              </span>
+              <span className="hours-notice__text">{hoursNotice}</span>
             </div>
           )}
 
           {hoursError && (
             <div className="hours-notice hours-notice--danger" role="alert">
-              <span>{hoursError}</span>
+              <span className="hours-notice__icon" aria-hidden="true">
+                ⛔
+              </span>
+              <span className="hours-notice__text">{hoursError}</span>
             </div>
           )}
         </div>
@@ -3041,7 +3056,12 @@ const TimeLogger = () => {
       </div>
 
       <div className={`step-description step-description--${infoTone}`}>
-        <span className="step-description__text">{infoText}</span>
+        <span className="step-description__main">
+          <span className="step-description__icon" aria-hidden="true">
+            {infoToneIcon}
+          </span>
+          <span className="step-description__text">{infoText}</span>
+        </span>
         {showInfoRetry && (
           <button type="button" className="step-description__retry" onClick={loadMonthData}>
             Обновить
