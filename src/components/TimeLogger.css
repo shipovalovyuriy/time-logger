@@ -459,6 +459,10 @@ html[data-tg-color-scheme='light'] .segment-chip.active {
   gap: 8px;
 }
 
+.actions-row--single {
+  grid-template-columns: 1fr;
+}
+
 .primary-button,
 .secondary-button,
 .retry-button,

@@ -2656,17 +2656,6 @@ const TimeLogger = () => {
           {hoursError && (
             <div className="hours-notice hours-notice--danger" role="alert">
               <span>{hoursError}</span>
-              <button
-                type="button"
-                className="retry-button"
-                onClick={() => {
-                  loadHoursCatalog();
-                  loadHoursDayEntries(hoursSelectedDate);
-                }}
-                disabled={hoursIsLoading || hoursIsSaving}
-              >
-                Обновить
-              </button>
             </div>
           )}
         </div>
@@ -2925,23 +2914,25 @@ const TimeLogger = () => {
             )}
           </div>
 
-          <div className="actions-row">
+          <div
+            className={`actions-row ${
+              hoursActiveTab === 'worklogs' || (hoursActiveTab === 'add' && !isHoursEntryEditing)
+                ? 'actions-row--single'
+                : ''
+            }`}
+          >
             {hoursActiveTab === 'add' ? (
               <>
-                <button
-                  type="button"
-                  className="secondary-button"
-                  onClick={() => {
-                    if (isHoursEntryEditing) {
-                      cancelHoursEditing();
-                      return;
-                    }
-                    loadHoursDayEntries(hoursSelectedDate);
-                  }}
-                  disabled={hoursIsSaving || hoursIsLoading}
-                >
-                  {isHoursEntryEditing ? 'Отмена' : 'Обновить'}
-                </button>
+                {isHoursEntryEditing && (
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={cancelHoursEditing}
+                    disabled={hoursIsSaving || hoursIsLoading}
+                  >
+                    Отмена
+                  </button>
+                )}
                 <button
                   type="button"
                   className="primary-button"
@@ -2955,19 +2946,11 @@ const TimeLogger = () => {
               <>
                 <button
                   type="button"
-                  className="secondary-button"
+                  className="primary-button"
                   onClick={() => setHoursActiveTab('add')}
                   disabled={hoursIsSaving || hoursIsLoading}
                 >
                   Добавить
-                </button>
-                <button
-                  type="button"
-                  className="primary-button"
-                  onClick={() => loadHoursDayEntries(hoursSelectedDate)}
-                  disabled={hoursIsSaving || hoursIsLoading}
-                >
-                  Обновить
                 </button>
               </>
             )}
