@@ -855,6 +855,20 @@ html[data-keyboard-open='true'] .time-logger.hours-mode .actions-row {
   background: rgba(255, 255, 255, 0.06);
 }
 
+.hours-entry-row.is-editable {
+  cursor: pointer;
+}
+
+.hours-entry-row.is-editable:focus-visible {
+  outline: none;
+  border-color: var(--tg-button-color, #2ea6ff);
+  box-shadow: 0 0 0 2px rgba(46, 166, 255, 0.22);
+}
+
+.hours-entry-row.is-locked {
+  cursor: default;
+}
+
 .hours-entry-row__text {
   color: var(--tg-text-color, #ffffff);
   font-size: 13px;

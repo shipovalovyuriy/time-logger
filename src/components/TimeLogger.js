@@ -2864,33 +2864,51 @@ const TimeLogger = () => {
 
                       {Array.isArray(project?.entries) && project.entries.length ? (
                         <div className="hours-entries">
-                          {project.entries.map((entry) => (
-                            <div key={entry.id} className="hours-entry-row">
-                              <div className="hours-entry-row__text">
-                                {entry.activity_type_name} • {bucketLabel(entry.bucket)} • {entry.hours} ч
+                          {project.entries.map((entry) => {
+                            const isEntryLocked = isApproved || hoursIsSaving || hoursIsLoading;
+
+                            return (
+                              <div
+                                key={entry.id}
+                                className={`hours-entry-row ${isEntryLocked ? 'is-locked' : 'is-editable'}`}
+                                onClick={() => {
+                                  if (!isEntryLocked) {
+                                    startHoursEditEntry(projectId, entry);
+                                  }
+                                }}
+                                role="button"
+                                tabIndex={isEntryLocked ? -1 : 0}
+                                onKeyDown={(event) => {
+                                  if (isEntryLocked) {
+                                    return;
+                                  }
+                                  if (event.key === 'Enter' || event.key === ' ') {
+                                    event.preventDefault();
+                                    startHoursEditEntry(projectId, entry);
+                                  }
+                                }}
+                                aria-label={`Редактировать запись: ${entry.activity_type_name}, ${bucketLabel(entry.bucket)}, ${entry.hours} ч`}
+                              >
+                                <div className="hours-entry-row__text">
+                                  {entry.activity_type_name} • {bucketLabel(entry.bucket)} • {entry.hours} ч
+                                </div>
+                                <div className="project-actions">
+                                  <button
+                                    type="button"
+                                    className="clear-button"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      handleHoursDelete(projectId, entry.id);
+                                    }}
+                                    disabled={isEntryLocked}
+                                    aria-label="Удалить"
+                                  >
+                                    🗑
+                                  </button>
+                                </div>
                               </div>
-                              <div className="project-actions">
-                                <button
-                                  type="button"
-                                  className="clear-button"
-                                  onClick={() => startHoursEditEntry(projectId, entry)}
-                                  disabled={isApproved || hoursIsSaving || hoursIsLoading}
-                                  aria-label="Редактировать"
-                                >
-                                  ✎
-                                </button>
-                                <button
-                                  type="button"
-                                  className="clear-button"
-                                  onClick={() => handleHoursDelete(projectId, entry.id)}
-                                  disabled={isApproved || hoursIsSaving || hoursIsLoading}
-                                  aria-label="Удалить"
-                                >
-                                  🗑
-                                </button>
-                              </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       ) : (
                         <div className="hours-empty">Нет строк</div>
