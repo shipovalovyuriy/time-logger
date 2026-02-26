@@ -6,6 +6,8 @@ const API_BASE = 'https://test.newpulse.pkz.icdc.io';
 const MAX_TOTAL_PERCENT = 100;
 const SEGMENT_STEP = 10;
 const DAY_CAPACITY_HOURS = 8;
+const WORK_BUCKET = 1;
+const OVER_BUCKET = 2;
 const DOUBLE_TAP_THRESHOLD_MS = 320;
 const REWARD_ANIMATION_MS = 1100;
 
@@ -85,6 +87,14 @@ const formatDateKey = (date) => {
   return `${date.getFullYear()}-${month}-${day}`;
 };
 
+const formatUiDateKey = (value) => {
+  const [year, month, day] = String(value || '').split('-');
+  if (!year || !month || !day) {
+    return String(value || '');
+  }
+  return `${day}.${month}.${year}`;
+};
+
 const formatShortDate = (date) => {
   const day = String(date.getDate()).padStart(2, '0');
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -142,6 +152,14 @@ const sumPercentMap = (map) =>
   Object.values(map).reduce((sum, value) => sum + (Number(value) || 0), 0);
 
 const getProjectColor = (index) => PROJECT_COLORS[index % PROJECT_COLORS.length];
+
+const safeIntegerHours = (value) => {
+  const raw = Number(value);
+  if (!Number.isFinite(raw)) return 0;
+  return Math.max(0, Math.trunc(raw));
+};
+
+const bucketLabel = (bucket) => (Number(bucket) === OVER_BUCKET ? 'Over' : 'Work');
 
 const extractResult = (payload) => {
   if (payload && typeof payload === 'object' && !Array.isArray(payload) && 'result' in payload) {
@@ -557,6 +575,41 @@ const fetchSessionMemberId = async (authToken) => {
   return null;
 };
 
+const extractTimesheetMode = (payload) => {
+  const result = extractResult(payload);
+  const candidates = [
+    payload?.timesheet_mode,
+    payload?.timesheetMode,
+    result?.timesheet_mode,
+    result?.timesheetMode
+  ];
+
+  for (let index = 0; index < candidates.length; index += 1) {
+    const parsed = toPositiveInt(candidates[index]);
+    if (parsed) {
+      return parsed;
+    }
+  }
+
+  return null;
+};
+
+const fetchSessionTimesheetMode = async (authToken) => {
+  const payload = await requestJson(
+    `${API_BASE}/auth-service/api/v1/check`,
+    {
+      method: 'GET',
+      headers: {
+        Authorization: authToken,
+        'Content-Type': 'application/json'
+      }
+    },
+    'Не удалось получить данные текущей сессии'
+  );
+
+  return extractTimesheetMode(payload);
+};
+
 const resolveMemberId = async (authToken) => {
   const fromStorage = toPositiveInt(storage.getItem('userId'));
   if (fromStorage) {
@@ -725,6 +778,139 @@ const fetchWeeklyActivityDistribution = async (authToken, memberId, rangeStart, 
   };
 };
 
+const fetchProjectsShort = async (authToken, memberId) => {
+  const payload = await requestJson(
+    `${API_BASE}/project-service/api/v1/project/list/short?member_id=${memberId}`,
+    {
+      method: 'GET',
+      headers: {
+        Authorization: authToken,
+        'Content-Type': 'application/json'
+      }
+    },
+    'Не удалось загрузить проекты'
+  );
+
+  const rows = Array.isArray(extractResult(payload))
+    ? extractResult(payload)
+    : Array.isArray(payload)
+    ? payload
+    : [];
+
+  const seen = new Set();
+  const parsed = [];
+
+  rows.forEach((item, index) => {
+    const projectId = Number(item?.id);
+    if (!Number.isFinite(projectId) || projectId <= 0 || seen.has(projectId)) {
+      return;
+    }
+    seen.add(projectId);
+
+    parsed.push({
+      id: projectId,
+      name: item?.project_name || `Проект ${projectId}`,
+      order: index
+    });
+  });
+
+  return parsed;
+};
+
+const fetchActivityTypesFull = async (authToken) => {
+  const payload = await requestJson(
+    `${API_BASE}/directory-service/api/v1/timesheet/activity-types?only_active=true`,
+    {
+      method: 'GET',
+      headers: {
+        Authorization: authToken,
+        'Content-Type': 'application/json'
+      }
+    },
+    'Не удалось загрузить типы активностей'
+  );
+
+  const rows = Array.isArray(extractResult(payload))
+    ? extractResult(payload)
+    : Array.isArray(payload)
+    ? payload
+    : [];
+
+  const parsed = rows
+    .filter((item) => Number(item?.id) > 0)
+    .sort((left, right) => {
+      const leftOrder = Number(left?.sort_order || 0);
+      const rightOrder = Number(right?.sort_order || 0);
+      return leftOrder - rightOrder;
+    })
+    .map((item) => ({
+      id: Number(item.id),
+      code: String(item.code || ''),
+      name_ru: item?.name_ru || String(item.code || item.id),
+      sort_order: Number(item?.sort_order || 0)
+    }));
+
+  if (parsed.length === 0) {
+    throw new Error('Нет доступных типов активностей для логирования.');
+  }
+
+  return parsed;
+};
+
+const fetchTimeEntriesDay = async (authToken, memberId, spentOn) => {
+  const payload = await requestJson(
+    `${API_BASE}/project-service/api/v1/timesheet/time-entries/day?member_id=${memberId}&spent_on=${spentOn}`,
+    {
+      method: 'GET',
+      headers: {
+        Authorization: authToken,
+        'Content-Type': 'application/json'
+      }
+    },
+    'Не удалось загрузить worklogs'
+  );
+
+  const result = extractResult(payload);
+  if (!result || typeof result !== 'object') {
+    return {
+      member_id: memberId,
+      spent_on: spentOn,
+      work_hour: 0,
+      over_hour: 0,
+      total_hour: 0,
+      confirm_status_by_project_id: {},
+      projects: []
+    };
+  }
+
+  return {
+    member_id: Number(result?.member_id || memberId),
+    spent_on: String(result?.spent_on || spentOn),
+    work_hour: Number(result?.work_hour || 0),
+    over_hour: Number(result?.over_hour || 0),
+    total_hour: Number(result?.total_hour || 0),
+    confirm_status_by_project_id:
+      result?.confirm_status_by_project_id && typeof result.confirm_status_by_project_id === 'object'
+        ? result.confirm_status_by_project_id
+        : {},
+    projects: Array.isArray(result?.projects) ? result.projects : []
+  };
+};
+
+const putTimeEntriesDay = async (authToken, body) =>
+  requestJson(
+    `${API_BASE}/project-service/api/v1/timesheet/time-entries/day`,
+    {
+      method: 'PUT',
+      headers: {
+        Authorization: authToken,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(body)
+    },
+    'Не удалось сохранить worklog'
+  );
+
 const TimeLogger = () => {
   const telegramWebApp = typeof window !== 'undefined' ? window.Telegram?.WebApp : null;
   const isTelegramWebApp = Boolean(telegramWebApp);
@@ -732,6 +918,7 @@ const TimeLogger = () => {
   const todayStart = useMemo(() => startOfDay(new Date()), []);
   const [activeDate, setActiveDate] = useState(() => startOfDay(new Date()));
   const [step, setStep] = useState(1);
+  const [timesheetMode, setTimesheetMode] = useState(null);
 
   const [projects, setProjects] = useState([]);
   const [activityTypes, setActivityTypes] = useState(DEFAULT_ACTIVITY_TYPES);
@@ -748,6 +935,27 @@ const TimeLogger = () => {
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [memberId, setMemberId] = useState(() => toPositiveInt(storage.getItem('userId')));
   const [rewardScope, setRewardScope] = useState(null);
+
+  const [hoursActiveTab, setHoursActiveTab] = useState('add');
+  const [hoursSelectedDate, setHoursSelectedDate] = useState(() =>
+    formatDateKey(startOfDay(new Date()))
+  );
+  const [hoursProjectsShort, setHoursProjectsShort] = useState([]);
+  const [hoursActivityTypesFull, setHoursActivityTypesFull] = useState([]);
+  const [hoursDayEntries, setHoursDayEntries] = useState(null);
+  const [hoursDraftEntry, setHoursDraftEntry] = useState(() => ({
+    project_id: 0,
+    activity_type_id: 0,
+    bucket: WORK_BUCKET,
+    hours: 0,
+    comment: ''
+  }));
+  const [hoursEditingEntry, setHoursEditingEntry] = useState(null);
+  const [hoursIsCatalogLoading, setHoursIsCatalogLoading] = useState(false);
+  const [hoursIsDayLoading, setHoursIsDayLoading] = useState(false);
+  const [hoursIsSaving, setHoursIsSaving] = useState(false);
+  const [hoursError, setHoursError] = useState(null);
+  const [hoursNotice, setHoursNotice] = useState(null);
 
   const paintRef = useRef({ active: false, scope: null, key: null });
   const tapRef = useRef({ rowKey: '', at: 0 });
@@ -800,6 +1008,67 @@ const TimeLogger = () => {
     () => activityTypes.map((type) => type.code),
     [activityTypes]
   );
+
+  const hoursMinDate = useMemo(() => formatDateKey(monthStart), [monthStart]);
+  const hoursMaxDate = useMemo(() => formatDateKey(todayStart), [todayStart]);
+  const hoursMonthPrefix = useMemo(() => String(hoursMinDate).slice(0, 7), [hoursMinDate]);
+
+  const hoursProjectOptions = useMemo(() => {
+    const merged = new Map();
+
+    hoursProjectsShort.forEach((project) => {
+      if (!project?.id) return;
+      merged.set(project.id, {
+        project_id: project.id,
+        project_name: project.name || `Проект ${project.id}`,
+        order: project.order || 0
+      });
+    });
+
+    if (hoursDayEntries?.projects && Array.isArray(hoursDayEntries.projects)) {
+      hoursDayEntries.projects.forEach((project) => {
+        const projectId = Number(project?.project_id);
+        if (!Number.isFinite(projectId) || projectId <= 0 || merged.has(projectId)) {
+          return;
+        }
+
+        merged.set(projectId, {
+          project_id: projectId,
+          project_name: project?.project_name || `Проект ${projectId}`,
+          order: merged.size
+        });
+      });
+    }
+
+    return [...merged.values()].sort((left, right) => left.order - right.order);
+  }, [hoursDayEntries?.projects, hoursProjectsShort]);
+
+  useEffect(() => {
+    if (timesheetMode !== 2) {
+      return;
+    }
+
+    setHoursDraftEntry((prev) => ({
+      ...prev,
+      project_id: prev.project_id > 0 ? prev.project_id : hoursProjectOptions[0]?.project_id || 0,
+      activity_type_id:
+        prev.activity_type_id > 0 ? prev.activity_type_id : hoursActivityTypesFull[0]?.id || 0
+    }));
+  }, [hoursActivityTypesFull, hoursProjectOptions, timesheetMode]);
+
+  useEffect(() => {
+    if (timesheetMode !== 2) {
+      return;
+    }
+
+    setHoursEditingEntry(null);
+    setHoursDraftEntry((prev) => ({
+      ...prev,
+      hours: 0,
+      comment: ''
+    }));
+    setHoursNotice(null);
+  }, [hoursSelectedDate, timesheetMode]);
 
   const isProjectComplete = projectTotalPercent === MAX_TOTAL_PERCENT;
   const isActivityComplete = activityTotalPercent === MAX_TOTAL_PERCENT;
@@ -958,6 +1227,10 @@ const TimeLogger = () => {
     }
 
     telegramWebApp.expand();
+    if (timesheetMode === 2) {
+      telegramWebApp.enableVerticalSwipes?.();
+      return undefined;
+    }
     if (isSubmitted) {
       telegramWebApp.enableVerticalSwipes?.();
     } else {
@@ -967,7 +1240,7 @@ const TimeLogger = () => {
     return () => {
       telegramWebApp.enableVerticalSwipes?.();
     };
-  }, [isSubmitted, telegramWebApp]);
+  }, [isSubmitted, telegramWebApp, timesheetMode]);
 
   useEffect(() => {
     if (!telegramWebApp) {
@@ -1104,6 +1377,132 @@ const TimeLogger = () => {
     return null;
   }, [ensureAuthToken, ensureMemberId, silentTelegramLogin]);
 
+  const runWithAuthRetry = useCallback(
+    async (runner) => {
+      let session = null;
+      try {
+        session = await resolveActiveSession();
+      } catch (sessionError) {
+        throw sessionError;
+      }
+
+      if (!session?.token || !session?.memberId) {
+        throw new Error('Не удалось авторизоваться. Выполните вход в приложении.');
+      }
+
+      let authToken = session.token;
+      let resolvedMemberId = session.memberId;
+
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          return await runner(authToken, resolvedMemberId);
+        } catch (error) {
+          if (error?.isAuthError && attempt === 0) {
+            const renewedToken = await silentTelegramLogin();
+            if (renewedToken) {
+              authToken = renewedToken;
+              const renewedMemberID = await ensureMemberId(renewedToken);
+              if (renewedMemberID) {
+                resolvedMemberId = renewedMemberID;
+                continue;
+              }
+              throw new Error('Не удалось определить пользователя в текущей сессии.');
+            }
+          }
+          throw error;
+        }
+      }
+
+      throw new Error('Не удалось выполнить запрос.');
+    },
+    [ensureMemberId, resolveActiveSession, silentTelegramLogin]
+  );
+
+  const loadHoursCatalog = useCallback(async () => {
+    setHoursIsCatalogLoading(true);
+    setHoursError(null);
+    setHoursNotice(null);
+
+    try {
+      const [projectsShort, activityTypesFull] = await runWithAuthRetry((token, currentMemberID) =>
+        Promise.all([
+          fetchProjectsShort(token, currentMemberID),
+          fetchActivityTypesFull(token)
+        ])
+      );
+
+      setHoursProjectsShort(projectsShort);
+      setHoursActivityTypesFull(activityTypesFull);
+    } catch (loadError) {
+      setHoursError(loadError.message || 'Не удалось загрузить справочники для учета часов.');
+      setHoursProjectsShort([]);
+      setHoursActivityTypesFull([]);
+    } finally {
+      setHoursIsCatalogLoading(false);
+    }
+  }, [runWithAuthRetry]);
+
+  const loadHoursDayEntries = useCallback(
+    async (spentOnKey) => {
+      if (!spentOnKey) {
+        return;
+      }
+
+      setHoursIsDayLoading(true);
+      setHoursError(null);
+
+      try {
+        const payload = await runWithAuthRetry((token, currentMemberID) =>
+          fetchTimeEntriesDay(token, currentMemberID, spentOnKey)
+        );
+
+        setHoursDayEntries(payload);
+      } catch (loadError) {
+        setHoursError(loadError.message || 'Не удалось загрузить worklogs за выбранный день.');
+        setHoursDayEntries(null);
+      } finally {
+        setHoursIsDayLoading(false);
+      }
+    },
+    [runWithAuthRetry]
+  );
+
+  useEffect(() => {
+    if (timesheetMode !== 2) {
+      return;
+    }
+
+    setHoursActiveTab('add');
+    setHoursSelectedDate(formatDateKey(todayStart));
+    setHoursEditingEntry(null);
+    setHoursDayEntries(null);
+    setHoursDraftEntry({
+      project_id: 0,
+      activity_type_id: 0,
+      bucket: WORK_BUCKET,
+      hours: 0,
+      comment: ''
+    });
+    setHoursError(null);
+    setHoursNotice(null);
+  }, [timesheetMode, todayStart]);
+
+  useEffect(() => {
+    if (timesheetMode !== 2) {
+      return;
+    }
+
+    loadHoursCatalog();
+  }, [loadHoursCatalog, timesheetMode]);
+
+  useEffect(() => {
+    if (timesheetMode !== 2) {
+      return;
+    }
+
+    loadHoursDayEntries(hoursSelectedDate);
+  }, [hoursSelectedDate, loadHoursDayEntries, timesheetMode]);
+
   const applySegmentData = useCallback((segmentEntry) => {
     if (!segmentEntry) return;
 
@@ -1134,6 +1533,34 @@ const TimeLogger = () => {
 
     setIsLoading(true);
     setError(null);
+
+    try {
+      const resolvedMode = await fetchSessionTimesheetMode(authToken);
+      if (loadRequestRef.current !== requestId) {
+        return;
+      }
+      if (resolvedMode) {
+        setTimesheetMode(resolvedMode);
+      }
+      if (resolvedMode === 2) {
+        setIsLoading(false);
+        setProjects([]);
+        setActivityTypes(DEFAULT_ACTIVITY_TYPES);
+        setProjectPercentById({});
+        setInitialProjectPercentById({});
+        setActivityPercentByCode({});
+        setInitialActivityPercentByCode({});
+        setSegmentDataByKey({});
+        setSegmentSummaryByKey({});
+        setError(null);
+        return;
+      }
+    } catch (modeError) {
+      if (loadRequestRef.current !== requestId) {
+        return;
+      }
+      // ignore: old tokens may not contain timesheet_mode
+    }
 
     const runLoad = async (token, currentMemberID) => {
       const [fetchedProjects, fetchedActivityTypes] = await Promise.all([
@@ -1229,6 +1656,21 @@ const TimeLogger = () => {
         break;
       } catch (error) {
         if (loadRequestRef.current !== requestId) {
+          return;
+        }
+
+        if (error?.status === 409) {
+          setTimesheetMode(2);
+          setIsLoading(false);
+          setProjects([]);
+          setActivityTypes(DEFAULT_ACTIVITY_TYPES);
+          setProjectPercentById({});
+          setInitialProjectPercentById({});
+          setActivityPercentByCode({});
+          setInitialActivityPercentByCode({});
+          setSegmentDataByKey({});
+          setSegmentSummaryByKey({});
+          setError(null);
           return;
         }
 
@@ -1697,6 +2139,11 @@ const TimeLogger = () => {
     if (!telegramWebApp) {
       return undefined;
     }
+    if (timesheetMode === 2) {
+      telegramWebApp.MainButton.hide();
+      telegramWebApp.BackButton.hide();
+      return undefined;
+    }
 
     const onMainButtonClick = () => {
       if (step === 1) {
@@ -1802,6 +2249,7 @@ const TimeLogger = () => {
     isSubmitted,
     projects.length,
     step,
+    timesheetMode,
     telegramWebApp
   ]);
 
@@ -1841,6 +2289,660 @@ const TimeLogger = () => {
   } else if (isSubmitted) {
     infoText = 'Отрезок успешно сохранен';
     infoTone = 'success';
+  }
+
+  const hoursIsLoading = hoursIsCatalogLoading || hoursIsDayLoading;
+  const hoursWorklogsCount =
+    hoursDayEntries?.projects?.reduce(
+      (acc, project) => acc + (Array.isArray(project?.entries) ? project.entries.length : 0),
+      0
+    ) ?? 0;
+
+  const hoursConfirmStatusByProjectId = useMemo(() => {
+    const raw = hoursDayEntries?.confirm_status_by_project_id;
+    const map = {};
+    if (!raw || typeof raw !== 'object') {
+      return map;
+    }
+
+    Object.entries(raw).forEach(([projectIdRaw, statusRaw]) => {
+      const projectId = Number(projectIdRaw);
+      if (!Number.isFinite(projectId) || projectId <= 0) {
+        return;
+      }
+
+      const status = Number(statusRaw);
+      if (!Number.isFinite(status)) {
+        return;
+      }
+
+      map[projectId] = status;
+    });
+
+    return map;
+  }, [hoursDayEntries?.confirm_status_by_project_id]);
+
+  const isHoursEntryEditing = Boolean(hoursEditingEntry);
+
+  const hoursOriginalEntry = useMemo(() => {
+    if (!hoursEditingEntry) {
+      return null;
+    }
+
+    const project = hoursDayEntries?.projects?.find(
+      (item) => Number(item?.project_id) === Number(hoursEditingEntry.project_id)
+    );
+    const entry = project?.entries?.find(
+      (item) => Number(item?.id) === Number(hoursEditingEntry.entry_id)
+    );
+
+    if (!entry) {
+      return null;
+    }
+
+    return {
+      hours: safeIntegerHours(entry?.hours),
+      bucket: Number(entry?.bucket) === OVER_BUCKET ? OVER_BUCKET : WORK_BUCKET
+    };
+  }, [hoursDayEntries?.projects, hoursEditingEntry]);
+
+  const hoursBaseWork = Number(hoursDayEntries?.work_hour || 0);
+  const hoursBaseOver = Number(hoursDayEntries?.over_hour || 0);
+  const hoursBaseTotal = hoursBaseWork + hoursBaseOver;
+
+  const safeDraftHours =
+    Number.isInteger(hoursDraftEntry.hours) && hoursDraftEntry.hours > 0 ? hoursDraftEntry.hours : 0;
+  const trimmedDraftComment = String(hoursDraftEntry.comment || '').trim();
+
+  const originalHours = hoursOriginalEntry?.hours ?? 0;
+  const originalBucket = hoursOriginalEntry?.bucket ?? WORK_BUCKET;
+
+  const previewWork =
+    hoursBaseWork -
+    (originalBucket === WORK_BUCKET ? originalHours : 0) +
+    (hoursDraftEntry.bucket === WORK_BUCKET ? safeDraftHours : 0);
+  const previewOver =
+    hoursBaseOver -
+    (originalBucket === OVER_BUCKET ? originalHours : 0) +
+    (hoursDraftEntry.bucket === OVER_BUCKET ? safeDraftHours : 0);
+  const previewTotal = previewWork + previewOver;
+
+  const hasInvalidHours = !Number.isInteger(hoursDraftEntry.hours) || hoursDraftEntry.hours < 0;
+  const hasMissingProject = safeDraftHours > 0 && hoursDraftEntry.project_id <= 0;
+  const hasMissingActivity = safeDraftHours > 0 && hoursDraftEntry.activity_type_id <= 0;
+  const hasMissingComment = safeDraftHours > 0 && trimmedDraftComment.length === 0;
+  const hasNoHoursProjects = hoursProjectOptions.length === 0;
+  const hasNoHoursActivities = hoursActivityTypesFull.length === 0;
+
+  const isHoursDateValid =
+    hoursSelectedDate >= hoursMinDate &&
+    hoursSelectedDate <= hoursMaxDate &&
+    hoursSelectedDate.startsWith(hoursMonthPrefix);
+
+  const isDayCapExceeded = previewTotal > DAY_CAPACITY_HOURS;
+  const selectedProjectConfirmStatus = hoursConfirmStatusByProjectId[hoursDraftEntry.project_id] || 0;
+  const isSelectedProjectApproved = selectedProjectConfirmStatus === 1;
+
+  const isHoursSaveDisabled =
+    !isHoursDateValid ||
+    hoursIsLoading ||
+    hoursIsSaving ||
+    isSelectedProjectApproved ||
+    hasInvalidHours ||
+    hasMissingProject ||
+    hasMissingActivity ||
+    hasMissingComment ||
+    hasNoHoursProjects ||
+    hasNoHoursActivities ||
+    isDayCapExceeded ||
+    safeDraftHours <= 0;
+
+  const cancelHoursEditing = () => {
+    setHoursEditingEntry(null);
+    setHoursDraftEntry((prev) => ({
+      ...prev,
+      hours: 0,
+      comment: ''
+    }));
+    setHoursNotice(null);
+  };
+
+  const startHoursEditEntry = (projectId, entry) => {
+    setHoursEditingEntry({
+      project_id: projectId,
+      entry_id: entry.id
+    });
+    setHoursDraftEntry({
+      project_id: projectId,
+      activity_type_id: Number(entry?.activity_type_id) || 0,
+      bucket: Number(entry?.bucket) === OVER_BUCKET ? OVER_BUCKET : WORK_BUCKET,
+      hours: safeIntegerHours(entry?.hours),
+      comment: String(entry?.comment || '')
+    });
+    setHoursActiveTab('add');
+    setHoursNotice(null);
+  };
+
+  const makeHoursPayloadLine = (line) => ({
+    hours: safeIntegerHours(line?.hours),
+    bucket: Number(line?.bucket) === OVER_BUCKET ? OVER_BUCKET : WORK_BUCKET,
+    activity_type_id: Number(line?.activity_type_id) || 0,
+    comment: line?.comment ? String(line.comment) : undefined
+  });
+
+  const handleHoursSave = async () => {
+    if (isHoursSaveDisabled) {
+      return;
+    }
+
+    const projectId = hoursEditingEntry?.project_id || hoursDraftEntry.project_id;
+    if (projectId <= 0) {
+      setHoursError('Выберите проект для логирования.');
+      return;
+    }
+
+    const project = hoursDayEntries?.projects?.find((item) => Number(item?.project_id) === Number(projectId));
+    const existingEntries = Array.isArray(project?.entries) ? project.entries : [];
+
+    const nextComment = trimmedDraftComment;
+
+    let payloadEntries = existingEntries.map((entry) => makeHoursPayloadLine(entry));
+
+    if (hoursEditingEntry) {
+      payloadEntries = existingEntries.map((entry) =>
+        Number(entry?.id) === Number(hoursEditingEntry.entry_id)
+          ? {
+              hours: safeDraftHours,
+              bucket: Number(hoursDraftEntry.bucket) === OVER_BUCKET ? OVER_BUCKET : WORK_BUCKET,
+              activity_type_id: Number(hoursDraftEntry.activity_type_id) || 0,
+              comment: nextComment
+            }
+          : makeHoursPayloadLine(entry)
+      );
+    } else {
+      payloadEntries.push({
+        hours: safeDraftHours,
+        bucket: Number(hoursDraftEntry.bucket) === OVER_BUCKET ? OVER_BUCKET : WORK_BUCKET,
+        activity_type_id: Number(hoursDraftEntry.activity_type_id) || 0,
+        comment: nextComment
+      });
+    }
+
+    setHoursIsSaving(true);
+    setHoursError(null);
+    setHoursNotice(null);
+
+    try {
+      await runWithAuthRetry((token, currentMemberID) =>
+        putTimeEntriesDay(token, {
+          member_id: currentMemberID,
+          project_id: projectId,
+          spent_on: hoursSelectedDate,
+          entries: payloadEntries
+        })
+      );
+
+      setHoursNotice(hoursEditingEntry ? 'Worklog обновлён' : 'Worklog добавлен');
+      setHoursEditingEntry(null);
+      setHoursDraftEntry((prev) => ({
+        ...prev,
+        hours: 0,
+        comment: ''
+      }));
+      loadHoursDayEntries(hoursSelectedDate);
+    } catch (saveError) {
+      setHoursError(saveError.message || 'Не удалось сохранить worklog.');
+    } finally {
+      setHoursIsSaving(false);
+    }
+  };
+
+  const handleHoursDelete = async (projectId, entryId) => {
+    if (!projectId || !entryId || hoursIsSaving || hoursIsLoading) {
+      return;
+    }
+
+    if ((hoursConfirmStatusByProjectId[projectId] || 0) === 1) {
+      return;
+    }
+
+    const project = hoursDayEntries?.projects?.find((item) => Number(item?.project_id) === Number(projectId));
+    const entries = Array.isArray(project?.entries) ? project.entries : [];
+    const target = entries.find((item) => Number(item?.id) === Number(entryId));
+
+    if (!target) {
+      return;
+    }
+
+    const ok = window.confirm(
+      `Удалить worklog?\n\n${target.activity_type_name} • ${bucketLabel(target.bucket)} • ${target.hours} ч`
+    );
+    if (!ok) {
+      return;
+    }
+
+    const payloadEntries = entries
+      .filter((item) => Number(item?.id) !== Number(entryId))
+      .map((entry) => makeHoursPayloadLine(entry));
+
+    setHoursIsSaving(true);
+    setHoursError(null);
+    setHoursNotice(null);
+
+    try {
+      await runWithAuthRetry((token, currentMemberID) =>
+        putTimeEntriesDay(token, {
+          member_id: currentMemberID,
+          project_id: projectId,
+          spent_on: hoursSelectedDate,
+          entries: payloadEntries
+        })
+      );
+
+      if (
+        hoursEditingEntry?.project_id === projectId &&
+        hoursEditingEntry?.entry_id === entryId
+      ) {
+        cancelHoursEditing();
+      }
+
+      setHoursNotice('Worklog удалён');
+      loadHoursDayEntries(hoursSelectedDate);
+    } catch (deleteError) {
+      setHoursError(deleteError.message || 'Не удалось удалить worklog.');
+    } finally {
+      setHoursIsSaving(false);
+    }
+  };
+
+  const projectHoursLabel = (project) => {
+    const workHour = Number(project?.work_hour || 0);
+    const overHour = Number(project?.over_hour || 0);
+    const parts = [];
+    if (workHour > 0) parts.push(`Work ${workHour} ч`);
+    if (overHour > 0) parts.push(`Over ${overHour} ч`);
+    if (!parts.length) parts.push('0 ч');
+    return parts.join(' • ');
+  };
+
+  if (timesheetMode === 2) {
+    return (
+      <div className={`time-logger ${isTelegramWebApp ? 'telegram-mode' : ''}`}>
+        <div className="panel hours-summary">
+          <div className="hours-summary__top">
+            <div className="hours-input-group">
+              <label htmlFor="hours-date">Дата</label>
+              <input
+                id="hours-date"
+                type="date"
+                value={hoursSelectedDate}
+                min={hoursMinDate}
+                max={hoursMaxDate}
+                onChange={(event) => setHoursSelectedDate(event.target.value)}
+                disabled={hoursIsLoading || hoursIsSaving}
+              />
+            </div>
+
+            <div className="hours-summary__metrics" aria-label="Итоги дня">
+              <div className="hours-metric">
+                <span className="hours-metric__label">Work</span>
+                <span className="hours-metric__value">{hoursBaseWork} ч</span>
+              </div>
+              <div className="hours-metric">
+                <span className="hours-metric__label">Over</span>
+                <span className="hours-metric__value">{hoursBaseOver} ч</span>
+              </div>
+              <div className="hours-metric">
+                <span className="hours-metric__label">Total</span>
+                <span className="hours-metric__value">{hoursBaseTotal} ч</span>
+              </div>
+            </div>
+          </div>
+
+          {safeDraftHours > 0 && (
+            <div className="hours-summary__preview">
+              После сохранения: Work {previewWork} ч • Over {previewOver} ч • Total {previewTotal} ч
+            </div>
+          )}
+
+          {isSelectedProjectApproved && hoursDraftEntry.project_id > 0 && (
+            <div className="hours-lock-banner" role="status">
+              <span className="hours-lock-banner__icon" aria-hidden="true">
+                🔒
+              </span>
+              <span>
+                Таймшит по проекту подтверждён — изменения заблокированы.
+              </span>
+            </div>
+          )}
+
+          {hoursNotice && (
+            <div className="hours-notice hours-notice--success" role="status">
+              {hoursNotice}
+            </div>
+          )}
+
+          {hoursError && (
+            <div className="hours-notice hours-notice--danger" role="alert">
+              <span>{hoursError}</span>
+              <button
+                type="button"
+                className="retry-button"
+                onClick={() => {
+                  loadHoursCatalog();
+                  loadHoursDayEntries(hoursSelectedDate);
+                }}
+                disabled={hoursIsLoading || hoursIsSaving}
+              >
+                Обновить
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className="hours-tabs" role="tablist" aria-label="Табы учета часов">
+          <button
+            type="button"
+            className={`hours-tab ${hoursActiveTab === 'add' ? 'active' : ''}`}
+            role="tab"
+            aria-selected={hoursActiveTab === 'add'}
+            onClick={() => setHoursActiveTab('add')}
+            disabled={hoursIsLoading || hoursIsSaving}
+          >
+            Добавить
+          </button>
+          <button
+            type="button"
+            className={`hours-tab ${hoursActiveTab === 'worklogs' ? 'active' : ''}`}
+            role="tab"
+            aria-selected={hoursActiveTab === 'worklogs'}
+            onClick={() => {
+              if (isHoursEntryEditing) {
+                window.alert('Сначала сохраните или отмените редактирование worklog.');
+                return;
+              }
+              setHoursActiveTab('worklogs');
+            }}
+            disabled={hoursIsLoading || hoursIsSaving}
+          >
+            Worklogs <span className="hours-badge">{hoursIsDayLoading ? '—' : hoursWorklogsCount}</span>
+          </button>
+        </div>
+
+        <section className="panel panel--list">
+          <div className="segments-list hours-scroll">
+            {hoursActiveTab === 'add' ? (
+              <div className="hours-form">
+                <div className="hours-form__header">
+                  <div className="hours-form__title">
+                    {isHoursEntryEditing ? 'Редактировать worklog' : 'Добавить новый worklog'}
+                  </div>
+                  {isHoursEntryEditing && (
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={cancelHoursEditing}
+                      disabled={hoursIsSaving || hoursIsLoading}
+                    >
+                      Отмена
+                    </button>
+                  )}
+                </div>
+
+                <div className="hours-form__grid">
+                  <div className="hours-input-group">
+                    <label htmlFor="hours-activity">Тип активности</label>
+                    <select
+                      id="hours-activity"
+                      value={hoursDraftEntry.activity_type_id ? String(hoursDraftEntry.activity_type_id) : ''}
+                      onChange={(event) =>
+                        setHoursDraftEntry((prev) => ({
+                          ...prev,
+                          activity_type_id: Number(event.target.value) || 0
+                        }))
+                      }
+                      disabled={hoursIsSaving || hoursIsLoading || isSelectedProjectApproved || hasNoHoursActivities}
+                    >
+                      <option value="">Выберите активность</option>
+                      {hoursActivityTypesFull.map((type) => (
+                        <option key={type.id} value={String(type.id)}>
+                          {type.name_ru}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="hours-input-group">
+                    <label htmlFor="hours-project">Проект</label>
+                    <select
+                      id="hours-project"
+                      value={hoursDraftEntry.project_id ? String(hoursDraftEntry.project_id) : ''}
+                      onChange={(event) =>
+                        setHoursDraftEntry((prev) => ({
+                          ...prev,
+                          project_id: Number(event.target.value) || 0
+                        }))
+                      }
+                      disabled={hoursIsSaving || hoursIsLoading || hasNoHoursProjects || isHoursEntryEditing}
+                    >
+                      <option value="">Выберите проект</option>
+                      {hoursProjectOptions.map((project) => (
+                        <option key={project.project_id} value={String(project.project_id)}>
+                          {project.project_name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="hours-input-group">
+                    <label htmlFor="hours-hours">Часы</label>
+                    <input
+                      id="hours-hours"
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={String(hoursDraftEntry.hours)}
+                      onChange={(event) =>
+                        setHoursDraftEntry((prev) => ({
+                          ...prev,
+                          hours: safeIntegerHours(event.target.value)
+                        }))
+                      }
+                      disabled={hoursIsSaving || hoursIsLoading || isSelectedProjectApproved}
+                    />
+                  </div>
+
+                  <div className="hours-input-group">
+                    <label htmlFor="hours-bucket">Тип часов</label>
+                    <select
+                      id="hours-bucket"
+                      value={String(hoursDraftEntry.bucket)}
+                      onChange={(event) =>
+                        setHoursDraftEntry((prev) => ({
+                          ...prev,
+                          bucket: Number(event.target.value) === OVER_BUCKET ? OVER_BUCKET : WORK_BUCKET
+                        }))
+                      }
+                      disabled={hoursIsSaving || hoursIsLoading || isSelectedProjectApproved}
+                    >
+                      <option value={String(WORK_BUCKET)}>Work</option>
+                      <option value={String(OVER_BUCKET)}>Over</option>
+                    </select>
+                  </div>
+
+                  <div className="hours-input-group hours-input-group--full">
+                    <label htmlFor="hours-comment">Что делали</label>
+                    <textarea
+                      id="hours-comment"
+                      rows={3}
+                      value={hoursDraftEntry.comment}
+                      onChange={(event) =>
+                        setHoursDraftEntry((prev) => ({
+                          ...prev,
+                          comment: event.target.value
+                        }))
+                      }
+                      placeholder="Коротко опишите, что делали"
+                      disabled={hoursIsSaving || hoursIsLoading || isSelectedProjectApproved}
+                    />
+                  </div>
+                </div>
+
+                {(hasInvalidHours || hasMissingProject || hasMissingActivity || hasMissingComment || isDayCapExceeded) && (
+                  <div className="hours-form__errors" role="alert">
+                    {hasInvalidHours && <div>Часы должны быть целым числом (0+).</div>}
+                    {hasMissingProject && <div>Выберите проект.</div>}
+                    {hasMissingActivity && <div>Выберите тип активности.</div>}
+                    {hasMissingComment && <div>Опишите, что делали.</div>}
+                    {isDayCapExceeded && <div>Нельзя сохранить больше {DAY_CAPACITY_HOURS} часов за день.</div>}
+                  </div>
+                )}
+
+                {!isHoursDateValid && (
+                  <div className="hours-form__hint hours-form__hint--danger">
+                    Можно логировать только даты текущего месяца (до сегодня).
+                  </div>
+                )}
+              </div>
+            ) : hoursIsLoading ? (
+              <div className="loading-container">
+                <div className="spinner" aria-hidden="true" />
+                <p>Загружаем worklogs…</p>
+              </div>
+            ) : hoursDayEntries?.projects?.length ? (
+              <div className="hours-worklogs">
+                <div className="hours-worklogs__title">
+                  Записи за {formatUiDateKey(hoursSelectedDate)}
+                </div>
+
+                {hoursDayEntries.projects.map((project, index) => {
+                  const projectId = Number(project?.project_id || 0);
+                  const isApproved = (hoursConfirmStatusByProjectId[projectId] || 0) === 1;
+                  const projectColor = getProjectColor(index);
+
+                  return (
+                    <div key={projectId || index} className="hours-project">
+                      {isApproved && (
+                        <div className="hours-lock-banner hours-lock-banner--compact">
+                          <span className="hours-lock-banner__icon" aria-hidden="true">
+                            🔒
+                          </span>
+                          <span>Подтверждено: редактирование заблокировано</span>
+                        </div>
+                      )}
+
+                      <div className="project-card__header">
+                        <div className="project-label">
+                          <span className="project-dot" style={{ backgroundColor: projectColor }} />
+                          <span className="project-name">{project?.project_name || `Проект ${projectId}`}</span>
+                        </div>
+                        <div className="project-actions">
+                          <span className="project-percent">{projectHoursLabel(project)}</span>
+                        </div>
+                      </div>
+
+                      {Array.isArray(project?.entries) && project.entries.length ? (
+                        <div className="hours-entries">
+                          {project.entries.map((entry) => (
+                            <div key={entry.id} className="hours-entry-row">
+                              <div className="hours-entry-row__text">
+                                {entry.activity_type_name} • {bucketLabel(entry.bucket)} • {entry.hours} ч
+                              </div>
+                              <div className="project-actions">
+                                <button
+                                  type="button"
+                                  className="clear-button"
+                                  onClick={() => startHoursEditEntry(projectId, entry)}
+                                  disabled={isApproved || hoursIsSaving || hoursIsLoading}
+                                  aria-label="Редактировать"
+                                >
+                                  ✎
+                                </button>
+                                <button
+                                  type="button"
+                                  className="clear-button"
+                                  onClick={() => handleHoursDelete(projectId, entry.id)}
+                                  disabled={isApproved || hoursIsSaving || hoursIsLoading}
+                                  aria-label="Удалить"
+                                >
+                                  🗑
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="hours-empty">Нет строк</div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="no-projects">
+                <p>За выбранную дату записей пока нет.</p>
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={() => setHoursActiveTab('add')}
+                  disabled={hoursIsSaving || hoursIsLoading}
+                >
+                  Добавить worklog
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="actions-row">
+            {hoursActiveTab === 'add' ? (
+              <>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => {
+                    if (isHoursEntryEditing) {
+                      cancelHoursEditing();
+                      return;
+                    }
+                    loadHoursDayEntries(hoursSelectedDate);
+                  }}
+                  disabled={hoursIsSaving || hoursIsLoading}
+                >
+                  {isHoursEntryEditing ? 'Отмена' : 'Обновить'}
+                </button>
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={handleHoursSave}
+                  disabled={isHoursSaveDisabled}
+                >
+                  {hoursIsSaving ? 'Сохраняем...' : 'Сохранить'}
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => setHoursActiveTab('add')}
+                  disabled={hoursIsSaving || hoursIsLoading}
+                >
+                  Добавить
+                </button>
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={() => loadHoursDayEntries(hoursSelectedDate)}
+                  disabled={hoursIsSaving || hoursIsLoading}
+                >
+                  Обновить
+                </button>
+              </>
+            )}
+          </div>
+        </section>
+      </div>
+    );
   }
 
   return (
