@@ -66,6 +66,9 @@ const endOfMonth = (date) =>
 const addDays = (date, days) =>
   new Date(date.getFullYear(), date.getMonth(), date.getDate() + days, 0, 0, 0, 0);
 
+const addMonths = (date, months) =>
+  new Date(date.getFullYear(), date.getMonth() + months, 1, 0, 0, 0, 0);
+
 const differenceInCalendarDays = (left, right) => {
   const oneDay = 24 * 60 * 60 * 1000;
   const normalizedLeft = startOfDay(left).getTime();
@@ -101,10 +104,28 @@ const formatShortDate = (date) => {
   return `${day}.${month}`;
 };
 
+const formatMonthKey = (date) => {
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  return `${date.getFullYear()}-${month}`;
+};
+
+const toMonthLabel = (date) =>
+  date
+    .toLocaleDateString('ru-RU', {
+      month: 'long',
+      year: 'numeric'
+    })
+    .replace(/\s?г\.$/i, '');
+
 const formatSegmentLabel = (start, end) =>
   `${formatShortDate(start)} - ${formatShortDate(end)}`;
 
 const getSegmentKey = (start, end) => `${formatDateKey(start)}_${formatDateKey(end)}`;
+
+const isSegmentSummaryComplete = (summary) =>
+  Boolean(summary) &&
+  Number(summary.projectTotal) === MAX_TOTAL_PERCENT &&
+  Number(summary.activityTotal) === MAX_TOTAL_PERCENT;
 
 const buildMonthSegments = (monthDate) => {
   const monthStart = startOfDay(startOfMonth(monthDate));
@@ -928,6 +949,9 @@ const TimeLogger = () => {
   const [initialActivityPercentByCode, setInitialActivityPercentByCode] = useState({});
   const [segmentSummaryByKey, setSegmentSummaryByKey] = useState({});
   const [segmentDataByKey, setSegmentDataByKey] = useState({});
+  const [carryoverSummaryByKey, setCarryoverSummaryByKey] = useState({});
+  const [isCarryoverSummaryLoaded, setIsCarryoverSummaryLoaded] = useState(false);
+  const [ignoreCarryoverAutoOpen, setIgnoreCarryoverAutoOpen] = useState(false);
 
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -968,9 +992,29 @@ const TimeLogger = () => {
     activity: 0
   });
 
-  const monthStart = useMemo(() => startOfMonth(todayStart), [todayStart]);
-  const monthEnd = useMemo(() => endOfMonth(todayStart), [todayStart]);
+  const currentMonthStart = useMemo(() => startOfMonth(todayStart), [todayStart]);
+  const currentMonthKey = useMemo(() => formatMonthKey(currentMonthStart), [currentMonthStart]);
+  const currentMonthLabel = useMemo(() => toMonthLabel(currentMonthStart), [currentMonthStart]);
+  const carryoverMonthStart = useMemo(
+    () => startOfMonth(addMonths(currentMonthStart, -1)),
+    [currentMonthStart]
+  );
+  const carryoverMonthEnd = useMemo(() => endOfMonth(carryoverMonthStart), [carryoverMonthStart]);
+  const carryoverMonthKey = useMemo(() => formatMonthKey(carryoverMonthStart), [carryoverMonthStart]);
+  const carryoverMonthLabel = useMemo(() => toMonthLabel(carryoverMonthStart), [carryoverMonthStart]);
+
+  const monthStart = useMemo(() => startOfMonth(activeDate), [activeDate]);
+  const monthEnd = useMemo(() => endOfMonth(activeDate), [activeDate]);
+  const monthKey = useMemo(() => formatMonthKey(monthStart), [monthStart]);
+  const currentMonthSegments = useMemo(
+    () => buildMonthSegments(currentMonthStart),
+    [currentMonthStart]
+  );
   const monthSegments = useMemo(() => buildMonthSegments(monthStart), [monthStart]);
+  const carryoverMonthSegments = useMemo(
+    () => buildMonthSegments(carryoverMonthStart),
+    [carryoverMonthStart]
+  );
   const activeSegmentIndex = useMemo(
     () => resolveActiveSegmentIndex(monthSegments, activeDate),
     [activeDate, monthSegments]
@@ -986,6 +1030,8 @@ const TimeLogger = () => {
   const activeSegment = monthSegments[activeSegmentIndex] || monthSegments[0] || null;
   const activeSegmentIsElapsed = isSegmentElapsed(activeSegment, todayStart);
   const activeSegmentPendingRelease = !activeSegmentIsElapsed;
+  const isViewingCurrentMonth = monthKey === currentMonthKey;
+  const isViewingCarryoverMonth = monthKey === carryoverMonthKey;
   const weekStart = activeSegment?.weekStart || monthStart;
   const weekEnd = activeSegment?.weekEnd || monthEnd;
   const weekKey = useMemo(() => getSegmentKey(weekStart, weekEnd), [weekEnd, weekStart]);
@@ -1009,7 +1055,7 @@ const TimeLogger = () => {
     [activityTypes]
   );
 
-  const hoursMinDate = useMemo(() => formatDateKey(monthStart), [monthStart]);
+  const hoursMinDate = useMemo(() => formatDateKey(currentMonthStart), [currentMonthStart]);
   const hoursMaxDate = useMemo(() => formatDateKey(todayStart), [todayStart]);
   const hoursMonthPrefix = useMemo(() => String(hoursMinDate).slice(0, 7), [hoursMinDate]);
 
@@ -1149,15 +1195,75 @@ const TimeLogger = () => {
     [projectPercentById, projects]
   );
 
-  useEffect(() => {
-    const isAnotherMonth =
-      activeDate.getFullYear() !== todayStart.getFullYear() ||
-      activeDate.getMonth() !== todayStart.getMonth();
+  const carryoverPendingSegments = useMemo(
+    () =>
+      carryoverMonthSegments.filter((segment) => {
+        const summaryKey = getSegmentKey(segment.weekStart, segment.weekEnd);
+        return !isSegmentSummaryComplete(carryoverSummaryByKey[summaryKey]);
+      }),
+    [carryoverMonthSegments, carryoverSummaryByKey]
+  );
+  const carryoverPendingSegmentsCount = carryoverPendingSegments.length;
+  const shouldShowCarryoverBanner =
+    isCarryoverSummaryLoaded &&
+    carryoverPendingSegmentsCount > 0 &&
+    (isViewingCurrentMonth || isViewingCarryoverMonth);
+  const shouldAutoOpenCarryoverMonth =
+    shouldShowCarryoverBanner &&
+    isViewingCurrentMonth &&
+    !isSegmentElapsed(currentMonthSegments[0], todayStart);
+  const carryoverMonthLabelLower = carryoverMonthLabel.toLowerCase();
+  const carryoverMonthName = carryoverMonthLabelLower.split(' ')[0] || carryoverMonthLabelLower;
+  const currentMonthLabelLower = currentMonthLabel.toLowerCase();
+  const carryoverSegmentWord =
+    carryoverPendingSegmentsCount % 10 === 1 && carryoverPendingSegmentsCount % 100 !== 11
+      ? 'отрезок'
+      : carryoverPendingSegmentsCount % 10 >= 2 &&
+        carryoverPendingSegmentsCount % 10 <= 4 &&
+        (carryoverPendingSegmentsCount % 100 < 10 || carryoverPendingSegmentsCount % 100 >= 20)
+      ? 'отрезка'
+      : 'отрезков';
 
-    if (activeDate.getTime() > todayStart.getTime() || isAnotherMonth) {
+  useEffect(() => {
+    if (activeDate.getTime() > todayStart.getTime()) {
       setActiveDate(todayStart);
     }
   }, [activeDate, todayStart]);
+
+  useEffect(() => {
+    if (!carryoverPendingSegmentsCount) {
+      setIgnoreCarryoverAutoOpen(false);
+    }
+  }, [carryoverPendingSegmentsCount]);
+
+  useEffect(() => {
+    if (timesheetMode === 2) {
+      return;
+    }
+    if (isLoading || ignoreCarryoverAutoOpen || !shouldAutoOpenCarryoverMonth) {
+      return;
+    }
+
+    const firstPendingSegment = carryoverPendingSegments[0];
+    if (!firstPendingSegment) {
+      return;
+    }
+
+    const currentKey = formatDateKey(startOfDay(activeDate));
+    const targetKey = formatDateKey(startOfDay(firstPendingSegment.weekStart));
+    if (currentKey === targetKey) {
+      return;
+    }
+
+    setActiveDate(startOfDay(firstPendingSegment.weekStart));
+  }, [
+    activeDate,
+    carryoverPendingSegments,
+    ignoreCarryoverAutoOpen,
+    isLoading,
+    shouldAutoOpenCarryoverMonth,
+    timesheetMode
+  ]);
 
   useEffect(() => {
     if (!latestElapsedSegment) {
@@ -1548,11 +1654,13 @@ const TimeLogger = () => {
     try {
       session = await resolveActiveSession();
     } catch (sessionError) {
+      setIsCarryoverSummaryLoaded(false);
       setError(sessionError.message || 'Не удалось авторизоваться. Выполните вход в приложении.');
       return;
     }
 
     if (!session?.token || !session?.memberId) {
+      setIsCarryoverSummaryLoaded(false);
       setError('Не удалось авторизоваться. Выполните вход в приложении.');
       return;
     }
@@ -1563,6 +1671,7 @@ const TimeLogger = () => {
     loadRequestRef.current = requestId;
 
     setIsLoading(true);
+    setIsCarryoverSummaryLoaded(false);
     setError(null);
 
     try {
@@ -1583,6 +1692,8 @@ const TimeLogger = () => {
         setInitialActivityPercentByCode({});
         setSegmentDataByKey({});
         setSegmentSummaryByKey({});
+        setCarryoverSummaryByKey({});
+        setIsCarryoverSummaryLoaded(false);
         setError(null);
         return;
       }
@@ -1594,73 +1705,93 @@ const TimeLogger = () => {
     }
 
     const runLoad = async (token, currentMemberID) => {
-      const [fetchedProjects, fetchedActivityTypes] = await Promise.all([
-        fetchProjects(token, currentMemberID, monthStart, monthEnd),
-        fetchActivityTypes(token)
-      ]);
+      const fetchedActivityTypes = await fetchActivityTypes(token);
 
-      const projectIds = fetchedProjects.map((project) => project.id);
-      const segmentPayloads = await Promise.all(
-        monthSegments.map(async (segment) => {
-          const [rangeRows, weeklyWorkload] = await Promise.all([
-            fetchRangeLite(
-              token,
-              currentMemberID,
-              projectIds,
-              segment.weekStart,
-              segment.weekEnd
-            ),
-            fetchWeeklyActivityDistribution(
-              token,
-              currentMemberID,
-              segment.weekStart,
-              segment.weekEnd
-            )
-          ]);
+      const loadMonthSnapshot = async (targetMonthStart, targetMonthEnd) => {
+        const targetSegments = buildMonthSegments(targetMonthStart);
+        const monthProjects = await fetchProjects(
+          token,
+          currentMemberID,
+          targetMonthStart,
+          targetMonthEnd
+        );
+        const projectIds = monthProjects.map((project) => project.id);
+        const segmentPayloads = await Promise.all(
+          targetSegments.map(async (segment) => {
+            const [rangeRows, weeklyWorkload] = await Promise.all([
+              fetchRangeLite(
+                token,
+                currentMemberID,
+                projectIds,
+                segment.weekStart,
+                segment.weekEnd
+              ),
+              fetchWeeklyActivityDistribution(
+                token,
+                currentMemberID,
+                segment.weekStart,
+                segment.weekEnd
+              )
+            ]);
 
-          const segmentKey = getSegmentKey(segment.weekStart, segment.weekEnd);
-          const entry = buildSegmentDataEntry({
-            projects: fetchedProjects,
-            activityTypes: fetchedActivityTypes,
-            rangeRows,
-            weeklyDistribution: weeklyWorkload.activityDistribution,
-            isLocked: weeklyWorkload.isLocked,
-            rangeStart: segment.weekStart,
-            rangeEnd: segment.weekEnd
-          });
+            const segmentKey = getSegmentKey(segment.weekStart, segment.weekEnd);
+            const entry = buildSegmentDataEntry({
+              projects: monthProjects,
+              activityTypes: fetchedActivityTypes,
+              rangeRows,
+              weeklyDistribution: weeklyWorkload.activityDistribution,
+              isLocked: weeklyWorkload.isLocked,
+              rangeStart: segment.weekStart,
+              rangeEnd: segment.weekEnd
+            });
 
-          return {
-            segmentKey,
-            entry
+            return {
+              segmentKey,
+              entry
+            };
+          })
+        );
+
+        const nextSegmentDataByKey = {};
+        const nextSummaryByKey = {};
+        segmentPayloads.forEach((item) => {
+          nextSegmentDataByKey[item.segmentKey] = item.entry;
+          nextSummaryByKey[item.segmentKey] = {
+            projectTotal: item.entry.projectTotal,
+            activityTotal: item.entry.activityTotal
           };
-        })
-      );
+        });
+
+        return {
+          projects: monthProjects,
+          segmentDataByKey: nextSegmentDataByKey,
+          summaryByKey: nextSummaryByKey
+        };
+      };
+
+      const activeMonthSnapshot = await loadMonthSnapshot(monthStart, monthEnd);
+      const nextCarryoverSummaryByKey =
+        monthKey === carryoverMonthKey
+          ? activeMonthSnapshot.summaryByKey
+          : (await loadMonthSnapshot(carryoverMonthStart, carryoverMonthEnd)).summaryByKey;
 
       if (loadRequestRef.current !== requestId) {
         return;
       }
 
-      const nextSegmentDataByKey = {};
-      const nextSummaryByKey = {};
-      segmentPayloads.forEach((item) => {
-        nextSegmentDataByKey[item.segmentKey] = item.entry;
-        nextSummaryByKey[item.segmentKey] = {
-          projectTotal: item.entry.projectTotal,
-          activityTotal: item.entry.activityTotal
-        };
-      });
-
-      setProjects(fetchedProjects);
+      setProjects(activeMonthSnapshot.projects);
       setActivityTypes(fetchedActivityTypes);
-      setSegmentDataByKey(nextSegmentDataByKey);
-      setSegmentSummaryByKey(nextSummaryByKey);
+      setSegmentDataByKey(activeMonthSnapshot.segmentDataByKey);
+      setSegmentSummaryByKey(activeMonthSnapshot.summaryByKey);
+      setCarryoverSummaryByKey(nextCarryoverSummaryByKey);
+      setIsCarryoverSummaryLoaded(true);
 
-      const activeEntry = nextSegmentDataByKey[weekKey];
+      const activeEntry = activeMonthSnapshot.segmentDataByKey[weekKey];
       if (activeEntry) {
         applySegmentData(activeEntry);
       } else {
         const emptyProjectPercents = {};
-        fetchedProjects.forEach((project) => {
+        activeMonthSnapshot.projects.forEach((project) => {
           emptyProjectPercents[project.id] = 0;
         });
         const emptyActivityPercents = {};
@@ -1701,6 +1832,8 @@ const TimeLogger = () => {
           setInitialActivityPercentByCode({});
           setSegmentDataByKey({});
           setSegmentSummaryByKey({});
+          setCarryoverSummaryByKey({});
+          setIsCarryoverSummaryLoaded(false);
           setError(null);
           return;
         }
@@ -1737,6 +1870,8 @@ const TimeLogger = () => {
       setInitialActivityPercentByCode({});
       setSegmentDataByKey({});
       setSegmentSummaryByKey({});
+      setCarryoverSummaryByKey({});
+      setIsCarryoverSummaryLoaded(false);
     }
 
     if (loadRequestRef.current === requestId) {
@@ -1744,12 +1879,15 @@ const TimeLogger = () => {
     }
   }, [
     applySegmentData,
-    resolveActiveSession,
+    carryoverMonthEnd,
+    carryoverMonthKey,
+    carryoverMonthStart,
     ensureMemberId,
-    silentTelegramLogin,
     monthEnd,
-    monthSegments,
+    monthKey,
     monthStart,
+    resolveActiveSession,
+    silentTelegramLogin,
     weekKey
   ]);
 
@@ -1972,6 +2110,19 @@ const TimeLogger = () => {
     );
   }, [isDirty, isSaving]);
 
+  const openCurrentMonth = useCallback(() => {
+    if (!confirmRangeSwitch()) return;
+    setIgnoreCarryoverAutoOpen(true);
+    setActiveDate(startOfDay(currentMonthStart));
+  }, [confirmRangeSwitch, currentMonthStart]);
+
+  const openCarryoverMonth = useCallback(() => {
+    if (!confirmRangeSwitch()) return;
+    const firstPendingSegment = carryoverPendingSegments[0];
+    setIgnoreCarryoverAutoOpen(false);
+    setActiveDate(startOfDay(firstPendingSegment?.weekStart || carryoverMonthStart));
+  }, [carryoverMonthStart, carryoverPendingSegments, confirmRangeSwitch]);
+
   const selectSegment = useCallback(
     (segment) => {
       if (!segment) return;
@@ -2128,6 +2279,15 @@ const TimeLogger = () => {
           activityTotal: activityTotalPercent
         }
       }));
+      if (isViewingCarryoverMonth) {
+        setCarryoverSummaryByKey((prev) => ({
+          ...prev,
+          [weekKey]: {
+            projectTotal: projectTotalPercent,
+            activityTotal: activityTotalPercent
+          }
+        }));
+      }
 
       setInitialProjectPercentById({ ...projectPercentById });
       setInitialActivityPercentByCode({ ...activityPercentByCode });
@@ -2155,6 +2315,7 @@ const TimeLogger = () => {
     activeSegmentIsLocked,
     activityTypes,
     isPeriodComplete,
+    isViewingCarryoverMonth,
     projectPercentById,
     projectTotalPercent,
     projects,
@@ -3017,6 +3178,28 @@ const TimeLogger = () => {
           <span className="stepper__text">Активности</span>
         </button>
       </div>
+
+      {shouldShowCarryoverBanner && (
+        <div className="carryover-banner" role="status">
+          <div className="carryover-banner__text-wrap">
+            <strong className="carryover-banner__title">
+              Вы оставили без внимания {carryoverPendingSegmentsCount} {carryoverSegmentWord} за{' '}
+              {carryoverMonthLabelLower}.
+            </strong>
+            <span className="carryover-banner__text">
+              Их можно дозаполнить сейчас или вернуться позже.
+            </span>
+          </div>
+          <button
+            type="button"
+            className="carryover-banner__action"
+            onClick={isViewingCarryoverMonth ? openCurrentMonth : openCarryoverMonth}
+            disabled={isLoading || isSaving}
+          >
+            {isViewingCarryoverMonth ? `Перейти к ${currentMonthLabelLower}` : `Открыть ${carryoverMonthName}`}
+          </button>
+        </div>
+      )}
 
       <div className="segments-bar" role="tablist" aria-label="Недельные отрезки">
         {monthSegments.map((segment) => {
