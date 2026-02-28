@@ -127,6 +127,16 @@ const isSegmentSummaryComplete = (summary) =>
   Number(summary.projectTotal) === MAX_TOTAL_PERCENT &&
   Number(summary.activityTotal) === MAX_TOTAL_PERCENT;
 
+const countPendingElapsedSegments = (segments, summaryByKey, todayStart) =>
+  segments.reduce((count, segment) => {
+    if (!isSegmentElapsed(segment, todayStart)) {
+      return count;
+    }
+
+    const summaryKey = getSegmentKey(segment.weekStart, segment.weekEnd);
+    return isSegmentSummaryComplete(summaryByKey?.[summaryKey]) ? count : count + 1;
+  }, 0);
+
 const buildMonthSegments = (monthDate) => {
   const monthStart = startOfDay(startOfMonth(monthDate));
   const monthEnd = startOfDay(endOfMonth(monthDate));
@@ -1204,6 +1214,19 @@ const TimeLogger = () => {
     [carryoverMonthSegments, carryoverSummaryByKey]
   );
   const carryoverPendingSegmentsCount = carryoverPendingSegments.length;
+  const activeMonthPendingSegmentsCount = useMemo(
+    () => countPendingElapsedSegments(monthSegments, segmentSummaryByKey, todayStart),
+    [monthSegments, segmentSummaryByKey, todayStart]
+  );
+  const carryoverPendingSegmentsForButtonCount = useMemo(() => {
+    if (isViewingCarryoverMonth) {
+      return 0;
+    }
+
+    return countPendingElapsedSegments(carryoverMonthSegments, carryoverSummaryByKey, todayStart);
+  }, [carryoverMonthSegments, carryoverSummaryByKey, isViewingCarryoverMonth, todayStart]);
+  const hasUrgentPendingSegments =
+    activeMonthPendingSegmentsCount + carryoverPendingSegmentsForButtonCount > 0;
   const shouldShowCarryoverBanner =
     isCarryoverSummaryLoaded &&
     carryoverPendingSegmentsCount > 0 &&
@@ -2364,10 +2387,22 @@ const TimeLogger = () => {
         (telegramWebApp.colorScheme ||
           document.documentElement.dataset.tgColorScheme ||
           'light') === 'light';
-      const activeButtonParams = {
+      const regularButtonParams = {
         color: themeParams.button_color || '#2ea6ff',
         text_color: themeParams.button_text_color || '#ffffff'
       };
+      const urgentButtonParams = isLightTheme
+        ? {
+            color: '#F85149',
+            text_color: '#ffffff'
+          }
+        : {
+            color: '#ff6b6b',
+            text_color: '#ffffff'
+          };
+      const activeButtonParams = hasUrgentPendingSegments
+        ? urgentButtonParams
+        : regularButtonParams;
       const disabledButtonParams = isLightTheme
         ? {
             color: '#d3d8e1',
@@ -2435,6 +2470,7 @@ const TimeLogger = () => {
     canGoToStep2,
     error,
     handleSubmit,
+    hasUrgentPendingSegments,
     isLoading,
     isPeriodComplete,
     isSaving,
