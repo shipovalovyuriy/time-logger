@@ -22,6 +22,66 @@ const statusClass = (status) => {
   return 'pending';
 };
 
+const toCleanString = (value) => {
+  const text = String(value || '').trim();
+  return text.length > 0 ? text : '';
+};
+
+const getMemberName = (member) => {
+  const directName =
+    toCleanString(member?.member_name) ||
+    toCleanString(member?.full_name) ||
+    toCleanString(member?.name);
+
+  if (directName) {
+    return directName;
+  }
+
+  const parts = [
+    toCleanString(member?.lastName),
+    toCleanString(member?.firstName),
+    toCleanString(member?.surName)
+  ].filter(Boolean);
+
+  if (parts.length > 0) {
+    return parts.join(' ');
+  }
+
+  const snakeCaseParts = [
+    toCleanString(member?.last_name),
+    toCleanString(member?.first_name),
+    toCleanString(member?.sur_name)
+  ].filter(Boolean);
+
+  if (snakeCaseParts.length > 0) {
+    return snakeCaseParts.join(' ');
+  }
+
+  return 'Без имени';
+};
+
+const getMemberCompany = (member) =>
+  toCleanString(member?.company_name) ||
+  toCleanString(member?.short_company_name) ||
+  toCleanString(member?.company) ||
+  '';
+
+const getMemberAvatar = (member) =>
+  toCleanString(member?.avatar_url) ||
+  toCleanString(member?.avatar) ||
+  toCleanString(member?.profile_image_url) ||
+  '';
+
+const getInitials = (displayName) => {
+  const normalized = toCleanString(displayName);
+  if (!normalized) return '??';
+  const words = normalized.split(/\s+/).filter(Boolean);
+  if (words.length === 1) {
+    return words[0].slice(0, 2).toUpperCase();
+  }
+  return `${words[0][0] || ''}${words[1][0] || ''}`.toUpperCase();
+};
+
 const ApprovalScreen = ({ onBack }) => {
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [month, setMonth] = useState(() => new Date().getMonth() + 1);
@@ -51,12 +111,6 @@ const ApprovalScreen = ({ onBack }) => {
       const token = await ensureAuthToken();
       const data = await fetchApprovalQuick(token, year, month);
       setProjects(data);
-      setExpandedProjects((prev) => {
-        if (prev.size === 0 && data.length > 0) {
-          return new Set([data[0]?.project_id]);
-        }
-        return prev;
-      });
     } catch (err) {
       setError(err.message || 'Не удалось загрузить данные.');
       setProjects([]);
@@ -136,6 +190,15 @@ const ApprovalScreen = ({ onBack }) => {
 
   return (
     <div className="approval-screen">
+      {isSaving && (
+        <div className="approval-saving-overlay">
+          <div className="approval-saving-overlay__content">
+            <div className="approval-saving-spinner" />
+            <span>Сохраняем...</span>
+          </div>
+        </div>
+      )}
+
       <div className="approval-screen__header">
         <span className="approval-screen__title">Апрув часов</span>
         <button type="button" className="approval-screen__back" onClick={onBack}>
@@ -188,6 +251,11 @@ const ApprovalScreen = ({ onBack }) => {
               const projectId = Number(project.project_id);
               const isOpen = expandedProjects.has(projectId);
               const members = Array.isArray(project.members) ? project.members : [];
+              const pendingCount = Number(project.pendingCount ?? 0) || members.filter((m) => Number(m.confirm_status || 0) === 0).length;
+              const approvedCount = Number(project.approvedCount ?? 0) || members.filter((m) => Number(m.confirm_status || 0) === 1).length;
+              const rejectedCount = Number(project.rejectedCount ?? 0) || members.filter((m) => Number(m.confirm_status || 0) === -1).length;
+              const managerName = toCleanString(project.manager_name);
+              const directionName = toCleanString(project.direction);
 
               return (
                 <div key={projectId} className="approval-project">
@@ -199,12 +267,42 @@ const ApprovalScreen = ({ onBack }) => {
                     onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleProject(projectId); } }}
                     aria-expanded={isOpen}
                   >
-                    <span className="approval-project__name">
-                      {project.project_name || `Проект ${projectId}`}
-                    </span>
-                    <span className={`approval-project__toggle ${isOpen ? 'open' : ''}`}>
-                      ▼
-                    </span>
+                    <div className="approval-project__identity">
+                      <span className="approval-project__name">
+                        {project.project_name || `Проект ${projectId}`}
+                      </span>
+                      <div className="approval-project__meta">
+                        {directionName && (
+                          <span className="approval-project__meta-item">{directionName}</span>
+                        )}
+                        {managerName && (
+                          <span className="approval-project__meta-item">PM: {managerName}</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="approval-project__summary">
+                      <span className="approval-project__counter approval-project__counter--total">
+                        {members.length}
+                      </span>
+                      {pendingCount > 0 && (
+                        <span className="approval-project__counter approval-project__counter--pending">
+                          {pendingCount}
+                        </span>
+                      )}
+                      {approvedCount > 0 && (
+                        <span className="approval-project__counter approval-project__counter--approved">
+                          {approvedCount}
+                        </span>
+                      )}
+                      {rejectedCount > 0 && (
+                        <span className="approval-project__counter approval-project__counter--rejected">
+                          {rejectedCount}
+                        </span>
+                      )}
+                      <span className={`approval-project__toggle ${isOpen ? 'open' : ''}`}>
+                        ▼
+                      </span>
+                    </div>
                   </div>
 
                   {isOpen && (
@@ -231,21 +329,34 @@ const ApprovalScreen = ({ onBack }) => {
                       {members.length === 0 ? (
                         <div className="approval-empty">Нет сотрудников.</div>
                       ) : (
-                        members.map((member) => {
-                          const mid = Number(member.member_id);
+                        members.map((member, memberIndex) => {
+                          const mid = Number(member.member_id) || memberIndex;
                           const cStatus = Number(member.confirm_status || 0);
                           const sClass = statusClass(cStatus);
+                          const memberName = getMemberName(member);
+                          const memberCompany = getMemberCompany(member);
+                          const memberAvatar = getMemberAvatar(member);
+                          const memberInitials = getInitials(memberName);
 
                           return (
-                            <div key={mid} className="approval-member">
+                            <div key={`${projectId}-${mid}-${memberIndex}`} className="approval-member">
                               <div className="approval-member__top">
-                                <div className="approval-member__info">
-                                  <span className="approval-member__name">
-                                    {member.member_name || member.full_name || `Сотрудник ${mid}`}
-                                  </span>
-                                  {member.company_name && (
-                                    <span className="approval-member__company">{member.company_name}</span>
-                                  )}
+                                <div className="approval-member__identity">
+                                  <div className="approval-member__avatar" aria-hidden="true">
+                                    {memberAvatar ? (
+                                      <img src={memberAvatar} alt="" />
+                                    ) : (
+                                      <span>{memberInitials}</span>
+                                    )}
+                                  </div>
+                                  <div className="approval-member__info">
+                                    <span className="approval-member__name">
+                                      {memberName}
+                                    </span>
+                                    {memberCompany && (
+                                      <span className="approval-member__company">{memberCompany}</span>
+                                    )}
+                                  </div>
                                 </div>
                                 <span className={`approval-status approval-status--${sClass}`}>
                                   {statusLabel(cStatus)}
@@ -254,19 +365,19 @@ const ApprovalScreen = ({ onBack }) => {
 
                               <div className="approval-member__metrics">
                                 <div className="approval-mini-metric">
-                                  <span className="approval-mini-metric__label">Work</span>
+                                  <span className="approval-mini-metric__label">Факт</span>
                                   <span className="approval-mini-metric__value">{member.work_hour ?? 0}</span>
                                 </div>
                                 <div className="approval-mini-metric">
-                                  <span className="approval-mini-metric__label">Over</span>
+                                  <span className="approval-mini-metric__label">Сверх</span>
                                   <span className="approval-mini-metric__value">{member.over_hour ?? 0}</span>
                                 </div>
                                 <div className="approval-mini-metric">
-                                  <span className="approval-mini-metric__label">Plan</span>
+                                  <span className="approval-mini-metric__label">План</span>
                                   <span className="approval-mini-metric__value">{member.planned_hour ?? 0}</span>
                                 </div>
                                 <div className="approval-mini-metric">
-                                  <span className="approval-mini-metric__label">Util %</span>
+                                  <span className="approval-mini-metric__label">Утил.</span>
                                   <span className="approval-mini-metric__value">
                                     {member.utilization != null ? `${member.utilization}%` : '—'}
                                   </span>
