@@ -472,19 +472,23 @@ const ApprovalScreen = ({ onBack }) => {
                               <div className="approval-member__actions">
                                 <button
                                   type="button"
-                                  className="approval-action-btn approval-action-btn--approve"
-                                  onClick={() => confirmMember(projectId, mid, 1)}
-                                  disabled={isSaving || isLoading || cStatus === 1}
-                                >
-                                  Ок
-                                </button>
-                                <button
-                                  type="button"
                                   className="approval-action-btn approval-action-btn--reject"
                                   onClick={() => confirmMember(projectId, mid, -1)}
                                   disabled={isSaving || isLoading || cStatus === -1}
+                                  aria-label="Отклонить"
+                                  title="Отклонить"
                                 >
-                                  Откл
+                                  ✕
+                                </button>
+                                <button
+                                  type="button"
+                                  className="approval-action-btn approval-action-btn--approve"
+                                  onClick={() => confirmMember(projectId, mid, 1)}
+                                  disabled={isSaving || isLoading || cStatus === 1}
+                                  aria-label="Подтвердить"
+                                  title="Подтвердить"
+                                >
+                                  ✓
                                 </button>
                                 {cStatus !== 0 && (
                                   <button
@@ -492,8 +496,10 @@ const ApprovalScreen = ({ onBack }) => {
                                     className="approval-action-btn approval-action-btn--reset"
                                     onClick={() => confirmMember(projectId, mid, 0)}
                                     disabled={isSaving || isLoading}
+                                    aria-label="Сбросить статус"
+                                    title="Сбросить статус"
                                   >
-                                    Сброс
+                                    ↺
                                   </button>
                                 )}
                               </div>

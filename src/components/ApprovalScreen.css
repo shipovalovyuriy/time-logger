@@ -426,6 +426,8 @@
 
 .approval-member__actions {
   display: flex;
+  justify-content: flex-end;
+  align-items: center;
   gap: 6px;
   flex-wrap: wrap;
 }
@@ -434,10 +436,17 @@
   border: 1px solid var(--approval-soft-strong);
   background: transparent;
   color: var(--tg-text-color, #fff);
-  border-radius: 999px;
-  padding: 4px 9px;
-  font-size: 11px;
-  font-weight: 800;
+  border-radius: 12px;
+  width: 42px;
+  min-width: 42px;
+  height: 42px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  font-weight: 900;
+  line-height: 1;
   cursor: pointer;
   transition: transform 120ms ease, opacity 120ms ease;
   -webkit-tap-highlight-color: transparent;
@@ -449,17 +458,26 @@
 }
 
 .approval-action-btn--approve {
-  border-color: rgba(106, 228, 151, 0.55);
-  color: #b4f6d8;
+  border-color: rgba(21, 128, 61, 0.9);
+  background: #16a34a;
+  color: #ffffff;
 }
 
 .approval-action-btn--reject {
-  border-color: rgba(255, 107, 107, 0.55);
-  color: #ffd0d0;
+  border-color: rgba(185, 28, 28, 0.9);
+  background: #dc2626;
+  color: #ffffff;
 }
 
 .approval-action-btn--reset {
   border-color: var(--approval-soft-strong);
+  background: transparent;
+  color: var(--tg-hint-color, #b6c2d9);
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  font-size: 16px;
 }
 
 .approval-empty {
@@ -571,14 +589,22 @@ html[data-tg-color-scheme='light'] .approval-status--rejected {
 
 html[data-tg-color-scheme='light'] .approval-bulk-btn--approve,
 html[data-tg-color-scheme='light'] .approval-action-btn--approve {
-  border-color: rgba(22, 163, 74, 0.4);
-  color: #14532d;
+  border-color: rgba(21, 128, 61, 0.9);
+  color: #ffffff;
+}
+
+html[data-tg-color-scheme='light'] .approval-action-btn--approve {
+  background: #16a34a;
 }
 
 html[data-tg-color-scheme='light'] .approval-bulk-btn--reject,
 html[data-tg-color-scheme='light'] .approval-action-btn--reject {
-  border-color: rgba(220, 38, 38, 0.4);
-  color: #7f1d1d;
+  border-color: rgba(185, 28, 28, 0.9);
+  color: #ffffff;
+}
+
+html[data-tg-color-scheme='light'] .approval-action-btn--reject {
+  background: #dc2626;
 }
 
 html[data-tg-color-scheme='light'] .approval-project__counter--pending {
