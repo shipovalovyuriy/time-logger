@@ -93,11 +93,13 @@
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
+  touch-action: pan-y;
   display: flex;
   flex-direction: column;
   gap: 12px;
   padding-right: 2px;
   padding-bottom: 8px;
+  scroll-padding-bottom: calc(var(--app-keyboard-inset, 0px) + 96px);
 }
 
 .approval-project {
@@ -114,6 +116,7 @@
   gap: 10px;
   padding: 14px 14px 12px;
   cursor: pointer;
+  touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
 

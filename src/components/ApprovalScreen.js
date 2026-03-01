@@ -83,6 +83,7 @@ const getInitials = (displayName) => {
 };
 
 const ApprovalScreen = ({ onBack }) => {
+  const telegramWebApp = typeof window !== 'undefined' ? window.Telegram?.WebApp : null;
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [month, setMonth] = useState(() => new Date().getMonth() + 1);
   const [projects, setProjects] = useState([]);
@@ -122,6 +123,15 @@ const ApprovalScreen = ({ onBack }) => {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    if (!telegramWebApp) return undefined;
+    telegramWebApp.expand?.();
+    telegramWebApp.disableVerticalSwipes?.();
+    return () => {
+      telegramWebApp.enableVerticalSwipes?.();
+    };
+  }, [telegramWebApp]);
 
   const changeMonth = (delta) => {
     let newMonth = month + delta;
