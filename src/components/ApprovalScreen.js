@@ -374,19 +374,19 @@ const ApprovalScreen = ({ onBack }) => {
                       <div className="approval-project__bulk">
                         <button
                           type="button"
-                          className="approval-bulk-btn approval-bulk-btn--approve"
-                          onClick={() => confirmAllInProject(projectId, 1)}
-                          disabled={isSaving || isLoading || members.length === 0}
-                        >
-                          Подтвердить всех
-                        </button>
-                        <button
-                          type="button"
                           className="approval-bulk-btn approval-bulk-btn--reject"
                           onClick={() => confirmAllInProject(projectId, -1)}
                           disabled={isSaving || isLoading || members.length === 0}
                         >
                           Отклонить всех
+                        </button>
+                        <button
+                          type="button"
+                          className="approval-bulk-btn approval-bulk-btn--approve"
+                          onClick={() => confirmAllInProject(projectId, 1)}
+                          disabled={isSaving || isLoading || members.length === 0}
+                        >
+                          Подтвердить всех
                         </button>
                       </div>
 
