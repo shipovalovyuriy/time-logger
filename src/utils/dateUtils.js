@@ -92,7 +92,13 @@ export const countPendingElapsedSegments = (segments, summaryByKey, todayStart) 
     }
 
     const summaryKey = getSegmentKey(segment.weekStart, segment.weekEnd);
-    return isSegmentSummaryComplete(summaryByKey?.[summaryKey]) ? count : count + 1;
+    const summary = summaryByKey?.[summaryKey];
+
+    if (summary?.isLocked) {
+      return count;
+    }
+
+    return isSegmentSummaryComplete(summary) ? count : count + 1;
   }, 0);
 
 export const buildMonthSegments = (monthDate) => {

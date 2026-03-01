@@ -82,7 +82,41 @@ const getInitials = (displayName) => {
   return `${words[0][0] || ''}${words[1][0] || ''}`.toUpperCase();
 };
 
+const toFiniteNumber = (value, fallback = 0) => {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  return num;
+};
+
+const formatHours = (value) => {
+  const num = toFiniteNumber(value, 0);
+  if (Number.isInteger(num)) return String(num);
+  return num.toFixed(1).replace(/\.0$/, '');
+};
+
+const getActivityLabel = (entry) =>
+  toCleanString(entry?.activity_type_code) ||
+  toCleanString(entry?.activity_type_name) ||
+  'Тип';
+
+const getMemberActivityEntries = (member) => {
+  const rawEntries = Array.isArray(member?.entries) ? member.entries : [];
+
+  const entries = rawEntries
+    .map((entry) => ({
+      label: getActivityLabel(entry),
+      hours: toFiniteNumber(entry?.hours, 0),
+      bucket: Number(entry?.bucket) === 2 ? 2 : 1
+    }))
+    .filter((entry) => entry.hours > 0);
+
+  entries.sort((a, b) => b.hours - a.hours);
+  return entries;
+};
+
 const ApprovalScreen = ({ onBack }) => {
+  const telegramWebApp = typeof window !== 'undefined' ? window.Telegram?.WebApp : null;
+  const approvalListRef = React.useRef(null);
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [month, setMonth] = useState(() => new Date().getMonth() + 1);
   const [projects, setProjects] = useState([]);
@@ -122,6 +156,36 @@ const ApprovalScreen = ({ onBack }) => {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    if (!telegramWebApp) return undefined;
+    telegramWebApp.expand?.();
+    telegramWebApp.disableVerticalSwipes?.();
+    return () => {
+      telegramWebApp.enableVerticalSwipes?.();
+    };
+  }, [telegramWebApp]);
+
+  useEffect(() => {
+    if (!telegramWebApp) return undefined;
+    const listElement = approvalListRef.current;
+    if (!listElement) return undefined;
+
+    let ticking = false;
+    const keepExpanded = () => {
+      if (ticking) return;
+      ticking = true;
+      window.requestAnimationFrame(() => {
+        telegramWebApp.expand?.();
+        ticking = false;
+      });
+    };
+
+    listElement.addEventListener('scroll', keepExpanded, { passive: true });
+    return () => {
+      listElement.removeEventListener('scroll', keepExpanded);
+    };
+  }, [telegramWebApp, projects.length]);
 
   const changeMonth = (delta) => {
     let newMonth = month + delta;
@@ -243,7 +307,7 @@ const ApprovalScreen = ({ onBack }) => {
           <p>Загружаем данные…</p>
         </div>
       ) : (
-        <div className="approval-list">
+        <div className="approval-list" ref={approvalListRef}>
           {projects.length === 0 && !error ? (
             <div className="approval-empty">Нет проектов для апрува за выбранный месяц.</div>
           ) : (
@@ -310,19 +374,19 @@ const ApprovalScreen = ({ onBack }) => {
                       <div className="approval-project__bulk">
                         <button
                           type="button"
-                          className="approval-bulk-btn approval-bulk-btn--approve"
-                          onClick={() => confirmAllInProject(projectId, 1)}
-                          disabled={isSaving || isLoading || members.length === 0}
-                        >
-                          Подтвердить всех
-                        </button>
-                        <button
-                          type="button"
                           className="approval-bulk-btn approval-bulk-btn--reject"
                           onClick={() => confirmAllInProject(projectId, -1)}
                           disabled={isSaving || isLoading || members.length === 0}
                         >
                           Отклонить всех
+                        </button>
+                        <button
+                          type="button"
+                          className="approval-bulk-btn approval-bulk-btn--approve"
+                          onClick={() => confirmAllInProject(projectId, 1)}
+                          disabled={isSaving || isLoading || members.length === 0}
+                        >
+                          Подтвердить всех
                         </button>
                       </div>
 
@@ -337,6 +401,13 @@ const ApprovalScreen = ({ onBack }) => {
                           const memberCompany = getMemberCompany(member);
                           const memberAvatar = getMemberAvatar(member);
                           const memberInitials = getInitials(memberName);
+                          const activityEntries = getMemberActivityEntries(member);
+                          const visibleEntries = activityEntries.slice(0, 4);
+                          const hiddenActivitiesCount = Math.max(0, activityEntries.length - visibleEntries.length);
+                          const workHours = toFiniteNumber(member.work_hour, 0);
+                          const overHours = toFiniteNumber(member.over_hour, 0);
+                          const plannedHours = toFiniteNumber(member.planned_hour, 0);
+                          const utilization = toFiniteNumber(member.utilization, NaN);
 
                           return (
                             <div key={`${projectId}-${mid}-${memberIndex}`} className="approval-member">
@@ -363,43 +434,61 @@ const ApprovalScreen = ({ onBack }) => {
                                 </span>
                               </div>
 
-                              <div className="approval-member__metrics">
-                                <div className="approval-mini-metric">
-                                  <span className="approval-mini-metric__label">Факт</span>
-                                  <span className="approval-mini-metric__value">{member.work_hour ?? 0}</span>
-                                </div>
-                                <div className="approval-mini-metric">
-                                  <span className="approval-mini-metric__label">Сверх</span>
-                                  <span className="approval-mini-metric__value">{member.over_hour ?? 0}</span>
-                                </div>
-                                <div className="approval-mini-metric">
-                                  <span className="approval-mini-metric__label">План</span>
-                                  <span className="approval-mini-metric__value">{member.planned_hour ?? 0}</span>
-                                </div>
-                                <div className="approval-mini-metric">
-                                  <span className="approval-mini-metric__label">Утил.</span>
-                                  <span className="approval-mini-metric__value">
-                                    {member.utilization != null ? `${member.utilization}%` : '—'}
-                                  </span>
-                                </div>
+                              <div className="approval-member__quick">
+                                <span className="approval-quick-chip">
+                                  <b>План:</b> {formatHours(plannedHours)} ч
+                                </span>
+                                <span className="approval-quick-chip">
+                                  <b>Факт:</b> {formatHours(workHours)} ч
+                                </span>
+                                <span className="approval-quick-chip">
+                                  <b>Overtime:</b> {formatHours(overHours)} ч
+                                </span>
+                                <span className="approval-quick-chip">
+                                  <b>Утилизация:</b> {Number.isFinite(utilization) ? `${formatHours(utilization)}%` : '—'}
+                                </span>
                               </div>
 
+                              {visibleEntries.length > 0 && (
+                                <div className="approval-member__activities">
+                                  {visibleEntries.map((entry, entryIndex) => (
+                                    <span
+                                      key={`${projectId}-${mid}-activity-${entry.label}-${entryIndex}`}
+                                      className={`approval-activity-chip ${
+                                        entry.bucket === 2 ? 'approval-activity-chip--over' : 'approval-activity-chip--work'
+                                      }`}
+                                    >
+                                      {entry.label} · {formatHours(entry.hours)}
+                                    </span>
+                                  ))}
+                                  {hiddenActivitiesCount > 0 && (
+                                    <span className="approval-activity-chip approval-activity-chip--more">
+                                      +{hiddenActivitiesCount}
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+
                               <div className="approval-member__actions">
-                                <button
-                                  type="button"
-                                  className="approval-action-btn approval-action-btn--approve"
-                                  onClick={() => confirmMember(projectId, mid, 1)}
-                                  disabled={isSaving || isLoading || cStatus === 1}
-                                >
-                                  Подтвердить
-                                </button>
                                 <button
                                   type="button"
                                   className="approval-action-btn approval-action-btn--reject"
                                   onClick={() => confirmMember(projectId, mid, -1)}
                                   disabled={isSaving || isLoading || cStatus === -1}
+                                  aria-label="Отклонить"
+                                  title="Отклонить"
                                 >
-                                  Отклонить
+                                  ✕
+                                </button>
+                                <button
+                                  type="button"
+                                  className="approval-action-btn approval-action-btn--approve"
+                                  onClick={() => confirmMember(projectId, mid, 1)}
+                                  disabled={isSaving || isLoading || cStatus === 1}
+                                  aria-label="Подтвердить"
+                                  title="Подтвердить"
+                                >
+                                  ✓
                                 </button>
                                 {cStatus !== 0 && (
                                   <button
@@ -407,8 +496,10 @@ const ApprovalScreen = ({ onBack }) => {
                                     className="approval-action-btn approval-action-btn--reset"
                                     onClick={() => confirmMember(projectId, mid, 0)}
                                     disabled={isSaving || isLoading}
+                                    aria-label="Сбросить статус"
+                                    title="Сбросить статус"
                                   >
-                                    Сбросить
+                                    ↺
                                   </button>
                                 )}
                               </div>
