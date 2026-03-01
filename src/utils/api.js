@@ -465,7 +465,24 @@ export const fetchApprovalQuick = async (authToken, year, month) => {
   );
 
   const result = extractResult(payload);
-  return Array.isArray(result) ? result : Array.isArray(payload) ? payload : [];
+
+  if (Array.isArray(result)) {
+    return result;
+  }
+
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+
+  if (Array.isArray(result?.projects)) {
+    return result.projects;
+  }
+
+  if (Array.isArray(payload?.projects)) {
+    return payload.projects;
+  }
+
+  return [];
 };
 
 export const putTimesheetConfirm = async (authToken, body) =>
