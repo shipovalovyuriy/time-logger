@@ -77,7 +77,7 @@ function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isTelegramWebApp, setIsTelegramWebApp] = useState(false);
   const [isAuthBootstrapping, setIsAuthBootstrapping] = useState(true);
-  const [canApprove, setCanApprove] = useState(false);
+  const [canApprove, setCanApprove] = useState(true);
   const [activeScreen, setActiveScreen] = useState('timelogger');
 
   useEffect(() => {
