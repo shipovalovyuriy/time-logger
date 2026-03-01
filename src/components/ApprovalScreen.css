@@ -13,6 +13,7 @@
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  overscroll-behavior: none;
 }
 
 .approval-screen__header {
@@ -92,10 +93,11 @@
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
-  overscroll-behavior: contain;
+  overscroll-behavior-y: none;
   touch-action: pan-y;
   display: flex;
   flex-direction: column;
+  align-items: stretch;
   gap: 12px;
   padding-right: 2px;
   padding-bottom: 8px;
@@ -107,6 +109,7 @@
   border-radius: 16px;
   background: transparent;
   overflow: hidden;
+  flex: 0 0 auto;
 }
 
 .approval-project__header {

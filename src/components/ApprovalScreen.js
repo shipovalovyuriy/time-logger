@@ -84,6 +84,7 @@ const getInitials = (displayName) => {
 
 const ApprovalScreen = ({ onBack }) => {
   const telegramWebApp = typeof window !== 'undefined' ? window.Telegram?.WebApp : null;
+  const approvalListRef = React.useRef(null);
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [month, setMonth] = useState(() => new Date().getMonth() + 1);
   const [projects, setProjects] = useState([]);
@@ -132,6 +133,27 @@ const ApprovalScreen = ({ onBack }) => {
       telegramWebApp.enableVerticalSwipes?.();
     };
   }, [telegramWebApp]);
+
+  useEffect(() => {
+    if (!telegramWebApp) return undefined;
+    const listElement = approvalListRef.current;
+    if (!listElement) return undefined;
+
+    let ticking = false;
+    const keepExpanded = () => {
+      if (ticking) return;
+      ticking = true;
+      window.requestAnimationFrame(() => {
+        telegramWebApp.expand?.();
+        ticking = false;
+      });
+    };
+
+    listElement.addEventListener('scroll', keepExpanded, { passive: true });
+    return () => {
+      listElement.removeEventListener('scroll', keepExpanded);
+    };
+  }, [telegramWebApp, projects.length]);
 
   const changeMonth = (delta) => {
     let newMonth = month + delta;
@@ -253,7 +275,7 @@ const ApprovalScreen = ({ onBack }) => {
           <p>Загружаем данные…</p>
         </div>
       ) : (
-        <div className="approval-list">
+        <div className="approval-list" ref={approvalListRef}>
           {projects.length === 0 && !error ? (
             <div className="approval-empty">Нет проектов для апрува за выбранный месяц.</div>
           ) : (
