@@ -1,8 +1,6 @@
 :root {
-  --approval-card-bg: color-mix(in srgb, var(--tg-secondary-bg-color, #17233a) 84%, #0f172a 16%);
   --approval-card-border: rgba(255, 255, 255, 0.14);
-  --approval-soft: rgba(255, 255, 255, 0.08);
-  --approval-soft-strong: rgba(255, 255, 255, 0.14);
+  --approval-soft-strong: rgba(255, 255, 255, 0.18);
 }
 
 .approval-screen {
@@ -35,7 +33,7 @@
 
 .approval-screen__back {
   border: 1px solid var(--approval-soft-strong);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.08));
+  background: transparent;
   color: var(--tg-text-color, #fff);
   border-radius: 999px;
   padding: 8px 16px;
@@ -54,14 +52,14 @@
   gap: 12px;
   flex-shrink: 0;
   border: 1px solid var(--approval-card-border);
-  background: linear-gradient(145deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.03));
+  background: transparent;
   border-radius: 14px;
   padding: 8px 10px;
 }
 
 .approval-month-nav__btn {
   border: 1px solid var(--approval-soft-strong);
-  background: rgba(255, 255, 255, 0.08);
+  background: transparent;
   color: var(--tg-text-color, #fff);
   border-radius: 10px;
   width: 34px;
@@ -105,11 +103,8 @@
 .approval-project {
   border: 1px solid var(--approval-card-border);
   border-radius: 16px;
-  background:
-    radial-gradient(120% 150% at 100% 0%, rgba(46, 166, 255, 0.14) 0%, rgba(46, 166, 255, 0) 58%),
-    var(--approval-card-bg);
+  background: transparent;
   overflow: hidden;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.14);
 }
 
 .approval-project__header {
@@ -153,7 +148,7 @@
   font-size: 11px;
   font-weight: 700;
   color: var(--tg-hint-color, #b6c2d9);
-  background: var(--approval-soft);
+  background: transparent;
 }
 
 .approval-project__summary {
@@ -171,30 +166,26 @@
   padding: 3px 8px;
   font-size: 11px;
   font-weight: 800;
-  background: rgba(255, 255, 255, 0.07);
+  background: transparent;
 }
 
 .approval-project__counter--total {
   color: var(--tg-text-color, #fff);
-  background: rgba(255, 255, 255, 0.12);
 }
 
 .approval-project__counter--pending {
   color: #ffd580;
-  border-color: rgba(255, 198, 109, 0.35);
-  background: rgba(150, 110, 34, 0.18);
+  border-color: rgba(255, 198, 109, 0.5);
 }
 
 .approval-project__counter--approved {
   color: #a4f0ca;
-  border-color: rgba(106, 228, 151, 0.35);
-  background: rgba(39, 125, 90, 0.18);
+  border-color: rgba(106, 228, 151, 0.5);
 }
 
 .approval-project__counter--rejected {
   color: #ffb3b3;
-  border-color: rgba(255, 107, 107, 0.35);
-  background: rgba(146, 43, 43, 0.18);
+  border-color: rgba(255, 107, 107, 0.5);
 }
 
 .approval-project__toggle {
@@ -224,7 +215,7 @@
 
 .approval-bulk-btn {
   border: 1px solid var(--approval-soft-strong);
-  background: rgba(255, 255, 255, 0.08);
+  background: transparent;
   color: var(--tg-text-color, #fff);
   border-radius: 10px;
   padding: 7px 12px;
@@ -241,23 +232,19 @@
 }
 
 .approval-bulk-btn--approve {
-  border-color: rgba(106, 228, 151, 0.48);
-  background: linear-gradient(180deg, rgba(106, 228, 151, 0.18), rgba(106, 228, 151, 0.08));
+  border-color: rgba(106, 228, 151, 0.55);
   color: #b0f6d3;
 }
 
 .approval-bulk-btn--reject {
-  border-color: rgba(255, 107, 107, 0.5);
-  background: linear-gradient(180deg, rgba(255, 107, 107, 0.22), rgba(255, 107, 107, 0.08));
+  border-color: rgba(255, 107, 107, 0.55);
   color: #ffc3c3;
 }
 
 .approval-member {
   border: 1px solid var(--approval-card-border);
   border-radius: 13px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02)),
-    rgba(0, 0, 0, 0.08);
+  background: transparent;
   padding: 11px 12px;
   display: flex;
   flex-direction: column;
@@ -284,11 +271,11 @@
   border-radius: 50%;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.24);
-  background: linear-gradient(140deg, rgba(46, 166, 255, 0.35), rgba(17, 83, 196, 0.25));
+  background: transparent;
   display: grid;
   place-items: center;
   flex-shrink: 0;
-  color: #fff;
+  color: var(--tg-hint-color, #b6c2d9);
   font-size: 11px;
   font-weight: 800;
 }
@@ -336,19 +323,19 @@
 
 .approval-status--pending {
   border: 1px solid rgba(255, 198, 109, 0.5);
-  background: rgba(150, 110, 34, 0.24);
+  background: transparent;
   color: #ffd580;
 }
 
 .approval-status--approved {
   border: 1px solid rgba(106, 228, 151, 0.5);
-  background: rgba(39, 125, 90, 0.24);
+  background: transparent;
   color: #a4f0ca;
 }
 
 .approval-status--rejected {
   border: 1px solid rgba(255, 107, 107, 0.52);
-  background: rgba(146, 43, 43, 0.24);
+  background: transparent;
   color: #ffb3b3;
 }
 
@@ -362,7 +349,7 @@
   border: 1px solid var(--approval-card-border);
   border-radius: 9px;
   padding: 6px;
-  background: rgba(255, 255, 255, 0.05);
+  background: transparent;
 }
 
 .approval-mini-metric__label {
@@ -388,7 +375,7 @@
 
 .approval-action-btn {
   border: 1px solid var(--approval-soft-strong);
-  background: rgba(255, 255, 255, 0.09);
+  background: transparent;
   color: var(--tg-text-color, #fff);
   border-radius: 9px;
   padding: 6px 10px;
@@ -406,25 +393,22 @@
 
 .approval-action-btn--approve {
   border-color: rgba(106, 228, 151, 0.55);
-  background: rgba(72, 210, 137, 0.22);
   color: #b4f6d8;
 }
 
 .approval-action-btn--reject {
   border-color: rgba(255, 107, 107, 0.55);
-  background: rgba(255, 107, 107, 0.18);
   color: #ffd0d0;
 }
 
 .approval-action-btn--reset {
   border-color: var(--approval-soft-strong);
-  background: rgba(255, 255, 255, 0.08);
 }
 
 .approval-empty {
   border: 1px solid var(--approval-card-border);
   border-radius: 14px;
-  background: var(--approval-card-bg);
+  background: transparent;
   padding: 22px 14px;
   text-align: center;
   color: var(--tg-hint-color, #b6c2d9);
@@ -435,7 +419,7 @@
 .approval-error {
   border: 1px solid rgba(255, 107, 107, 0.5);
   border-radius: 13px;
-  background: rgba(146, 43, 43, 0.28);
+  background: transparent;
   padding: 12px 14px;
   color: #ffd7d7;
   font-size: 13px;
@@ -448,7 +432,7 @@
 .approval-error__retry {
   align-self: flex-start;
   border: 1px solid var(--approval-soft-strong);
-  background: rgba(255, 255, 255, 0.15);
+  background: transparent;
   color: var(--tg-text-color, #fff);
   border-radius: 9px;
   padding: 6px 12px;
@@ -473,8 +457,8 @@
 }
 
 .approval-saving-overlay__content {
-  background: var(--approval-card-bg);
   border: 1px solid var(--approval-card-border);
+  background: var(--tg-bg-color, #0f172a);
   border-radius: 14px;
   padding: 16px 24px;
   display: flex;
@@ -483,7 +467,6 @@
   color: var(--tg-text-color, #fff);
   font-size: 13px;
   font-weight: 700;
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.3);
 }
 
 .approval-saving-spinner {
@@ -511,73 +494,59 @@
 /* Light theme tuning */
 html[data-tg-color-scheme='light'] {
   --approval-card-border: rgba(15, 23, 42, 0.12);
-  --approval-soft: rgba(15, 23, 42, 0.06);
-  --approval-soft-strong: rgba(15, 23, 42, 0.16);
-}
-
-html[data-tg-color-scheme='light'] .approval-project {
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+  --approval-soft-strong: rgba(15, 23, 42, 0.18);
 }
 
 html[data-tg-color-scheme='light'] .approval-status--pending {
-  border-color: rgba(202, 138, 4, 0.35);
-  background: rgba(250, 204, 21, 0.2);
+  border-color: rgba(202, 138, 4, 0.4);
   color: #92400e;
 }
 
 html[data-tg-color-scheme='light'] .approval-status--approved {
-  border-color: rgba(22, 163, 74, 0.35);
-  background: rgba(134, 239, 172, 0.24);
+  border-color: rgba(22, 163, 74, 0.4);
   color: #14532d;
 }
 
 html[data-tg-color-scheme='light'] .approval-status--rejected {
-  border-color: rgba(220, 38, 38, 0.35);
-  background: rgba(254, 202, 202, 0.35);
+  border-color: rgba(220, 38, 38, 0.4);
   color: #7f1d1d;
 }
 
 html[data-tg-color-scheme='light'] .approval-bulk-btn--approve,
 html[data-tg-color-scheme='light'] .approval-action-btn--approve {
-  border-color: rgba(22, 163, 74, 0.35);
-  background: rgba(134, 239, 172, 0.22);
+  border-color: rgba(22, 163, 74, 0.4);
   color: #14532d;
 }
 
 html[data-tg-color-scheme='light'] .approval-bulk-btn--reject,
 html[data-tg-color-scheme='light'] .approval-action-btn--reject {
-  border-color: rgba(220, 38, 38, 0.35);
-  background: rgba(254, 202, 202, 0.34);
+  border-color: rgba(220, 38, 38, 0.4);
   color: #7f1d1d;
 }
 
-html[data-tg-color-scheme='light'] .approval-project__counter--total {
-  background: rgba(15, 23, 42, 0.08);
-  color: var(--tg-text-color, #0f172a);
-}
-
 html[data-tg-color-scheme='light'] .approval-project__counter--pending {
-  border-color: rgba(202, 138, 4, 0.3);
-  background: rgba(250, 204, 21, 0.16);
+  border-color: rgba(202, 138, 4, 0.4);
   color: #92400e;
 }
 
 html[data-tg-color-scheme='light'] .approval-project__counter--approved {
-  border-color: rgba(22, 163, 74, 0.3);
-  background: rgba(134, 239, 172, 0.18);
+  border-color: rgba(22, 163, 74, 0.4);
   color: #14532d;
 }
 
 html[data-tg-color-scheme='light'] .approval-project__counter--rejected {
-  border-color: rgba(220, 38, 38, 0.3);
-  background: rgba(254, 202, 202, 0.28);
+  border-color: rgba(220, 38, 38, 0.4);
   color: #7f1d1d;
 }
 
 html[data-tg-color-scheme='light'] .approval-error {
-  border-color: rgba(220, 38, 38, 0.34);
-  background: rgba(254, 202, 202, 0.46);
+  border-color: rgba(220, 38, 38, 0.4);
   color: #7f1d1d;
+}
+
+html[data-tg-color-scheme='light'] .approval-member__avatar {
+  border-color: rgba(15, 23, 42, 0.18);
+  color: var(--tg-hint-color, #5f6b7c);
 }
 
 @media (max-width: 680px) {
