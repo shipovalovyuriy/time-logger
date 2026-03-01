@@ -24,6 +24,22 @@ const toPositiveInt = (value) => {
   return Math.trunc(parsed);
 };
 
+const APPROVAL_ROLE_IDS = new Set([2, 3, 4]);
+const APPROVAL_ROLE_NAMES = new Set([
+  'admin',
+  'pm',
+  'project_manager',
+  'project manager',
+  'админ',
+  'менеджер проекта',
+  'руководитель направления',
+  'рн',
+  'head_of_direction',
+  'head of direction'
+]);
+
+const normalizeRoleName = (value) => String(value || '').trim().toLowerCase();
+
 const extractMemberId = (payload) => {
   const result =
     payload && typeof payload === 'object' && !Array.isArray(payload) && 'result' in payload
@@ -53,68 +69,95 @@ const extractMemberId = (payload) => {
   return null;
 };
 
-const PM_ADMIN_ROLES = ['admin', 'pm', 'project_manager', 'Admin', 'PM', 'ProjectManager'];
-
-const extractRoles = (payload) => {
+const extractRoleCandidates = (payload) => {
   const result =
     payload && typeof payload === 'object' && !Array.isArray(payload) && 'result' in payload
       ? payload.result
       : payload;
 
-  const roles = result?.roles || payload?.roles || [];
-  return Array.isArray(roles) ? roles : [];
+  const candidates = [];
+  const roleArrays = [result?.roles, payload?.roles];
+
+  roleArrays.forEach((value) => {
+    if (Array.isArray(value)) {
+      candidates.push(...value);
+    }
+  });
+
+  if (result?.role) candidates.push(result.role);
+  if (payload?.role) candidates.push(payload.role);
+
+  const roleIdCandidates = [result?.role_id, payload?.role_id, result?._role, payload?._role];
+  roleIdCandidates.forEach((value) => {
+    const roleId = toPositiveInt(value);
+    if (roleId) candidates.push(roleId);
+  });
+
+  return candidates;
 };
 
-const hasApprovalAccess = (roles) => {
-  if (!Array.isArray(roles) || roles.length === 0) return false;
+const hasApprovalAccess = (payload) => {
+  const roles = extractRoleCandidates(payload);
+  if (!roles.length) return false;
+
   return roles.some((role) => {
-    const roleName = typeof role === 'string' ? role : role?.name || role?.code || '';
-    return PM_ADMIN_ROLES.some((pmRole) => pmRole.toLowerCase() === roleName.toLowerCase());
+    const roleId =
+      typeof role === 'number'
+        ? toPositiveInt(role)
+        : toPositiveInt(role?.id) || toPositiveInt(role?.role_id) || toPositiveInt(role?._role);
+
+    if (roleId && APPROVAL_ROLE_IDS.has(roleId)) {
+      return true;
+    }
+
+    const roleName =
+      typeof role === 'string'
+        ? role
+        : role?.name || role?.code || role?.role || role?.title || '';
+
+    return APPROVAL_ROLE_NAMES.has(normalizeRoleName(roleName));
   });
+};
+
+const fetchSessionAccess = async (authToken) => {
+  const token = toBearerToken(authToken);
+  if (!token) {
+    return null;
+  }
+
+  try {
+    const response = await fetch(`${API_BASE}/auth-service/api/v1/check`, {
+      method: 'GET',
+      headers: {
+        Authorization: token,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const payload = await response.json().catch(() => null);
+    return {
+      token,
+      memberId: extractMemberId(payload),
+      canApprove: hasApprovalAccess(payload)
+    };
+  } catch {
+    return null;
+  }
 };
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isTelegramWebApp, setIsTelegramWebApp] = useState(false);
   const [isAuthBootstrapping, setIsAuthBootstrapping] = useState(true);
-  const [canApprove, setCanApprove] = useState(true);
+  const [canApprove, setCanApprove] = useState(false);
   const [activeScreen, setActiveScreen] = useState('timelogger');
 
   useEffect(() => {
     let isMounted = true;
-
-    const validateStoredToken = async (authToken) => {
-      const token = toBearerToken(authToken);
-      if (!token) {
-        return null;
-      }
-
-      try {
-        const response = await fetch(`${API_BASE}/auth-service/api/v1/check`, {
-          method: 'GET',
-          headers: {
-            Authorization: token,
-            'Content-Type': 'application/json'
-          }
-        });
-
-        if (!response.ok) {
-          return null;
-        }
-
-        const payload = await response.json().catch(() => null);
-        const memberId = extractMemberId(payload);
-        const roles = extractRoles(payload);
-
-        return {
-          token,
-          memberId,
-          roles
-        };
-      } catch {
-        return null;
-      }
-    };
 
     const telegramLogin = async (telegramWebApp) => {
       const initData = String(telegramWebApp?.initData || '').trim();
@@ -157,7 +200,7 @@ function App() {
     const bootstrapAuth = async () => {
       const storedToken = storage.getItem('token');
       if (storedToken) {
-        const validSession = await validateStoredToken(storedToken);
+        const validSession = await fetchSessionAccess(storedToken);
         if (validSession) {
           storage.setItem('token', validSession.token);
           if (validSession.memberId) {
@@ -166,7 +209,7 @@ function App() {
 
           if (isMounted) {
             setIsAuthenticated(true);
-            setCanApprove(hasApprovalAccess(validSession.roles || []));
+            setCanApprove(Boolean(validSession.canApprove));
             setIsAuthBootstrapping(false);
           }
           return;
@@ -183,14 +226,15 @@ function App() {
           storage.setItem('token', telegramSession.token);
           if (telegramSession.memberId) {
             storage.setItem('userId', String(telegramSession.memberId));
-          } else {
-            const recheckedSession = await validateStoredToken(telegramSession.token);
-            if (recheckedSession?.memberId) {
-              storage.setItem('userId', String(recheckedSession.memberId));
-            }
-            if (recheckedSession?.roles) {
-              if (isMounted) setCanApprove(hasApprovalAccess(recheckedSession.roles));
-            }
+          }
+
+          const recheckedSession = await fetchSessionAccess(telegramSession.token);
+          if (recheckedSession?.memberId) {
+            storage.setItem('userId', String(recheckedSession.memberId));
+          }
+
+          if (isMounted) {
+            setCanApprove(Boolean(recheckedSession?.canApprove));
           }
 
           if (isMounted) {
@@ -373,6 +417,20 @@ function App() {
   const handleLoginSuccess = () => {
     setIsAuthenticated(true);
     setIsAuthBootstrapping(false);
+    setCanApprove(false);
+
+    const syncSessionAccess = async () => {
+      const session = await fetchSessionAccess(storage.getItem('token'));
+      if (!session) return;
+
+      storage.setItem('token', session.token);
+      if (session.memberId) {
+        storage.setItem('userId', String(session.memberId));
+      }
+      setCanApprove(Boolean(session.canApprove));
+    };
+
+    void syncSessionAccess();
   };
 
   const handleLogout = () => {
