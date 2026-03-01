@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import './App.css';
 import TimeLogger from './components/TimeLogger';
 import LoginForm from './components/LoginForm';
+import ApprovalScreen from './components/ApprovalScreen';
 import storage from './utils/storage';
 
 const API_BASE = 'https://test.newpulse.pkz.icdc.io';
@@ -52,10 +53,32 @@ const extractMemberId = (payload) => {
   return null;
 };
 
+const PM_ADMIN_ROLES = ['admin', 'pm', 'project_manager', 'Admin', 'PM', 'ProjectManager'];
+
+const extractRoles = (payload) => {
+  const result =
+    payload && typeof payload === 'object' && !Array.isArray(payload) && 'result' in payload
+      ? payload.result
+      : payload;
+
+  const roles = result?.roles || payload?.roles || [];
+  return Array.isArray(roles) ? roles : [];
+};
+
+const hasApprovalAccess = (roles) => {
+  if (!Array.isArray(roles) || roles.length === 0) return false;
+  return roles.some((role) => {
+    const roleName = typeof role === 'string' ? role : role?.name || role?.code || '';
+    return PM_ADMIN_ROLES.some((pmRole) => pmRole.toLowerCase() === roleName.toLowerCase());
+  });
+};
+
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isTelegramWebApp, setIsTelegramWebApp] = useState(false);
   const [isAuthBootstrapping, setIsAuthBootstrapping] = useState(true);
+  const [canApprove, setCanApprove] = useState(false);
+  const [activeScreen, setActiveScreen] = useState('timelogger');
 
   useEffect(() => {
     let isMounted = true;
@@ -81,10 +104,12 @@ function App() {
 
         const payload = await response.json().catch(() => null);
         const memberId = extractMemberId(payload);
+        const roles = extractRoles(payload);
 
         return {
           token,
-          memberId
+          memberId,
+          roles
         };
       } catch {
         return null;
@@ -141,6 +166,7 @@ function App() {
 
           if (isMounted) {
             setIsAuthenticated(true);
+            setCanApprove(hasApprovalAccess(validSession.roles || []));
             setIsAuthBootstrapping(false);
           }
           return;
@@ -161,6 +187,9 @@ function App() {
             const recheckedSession = await validateStoredToken(telegramSession.token);
             if (recheckedSession?.memberId) {
               storage.setItem('userId', String(recheckedSession.memberId));
+            }
+            if (recheckedSession?.roles) {
+              if (isMounted) setCanApprove(hasApprovalAccess(recheckedSession.roles));
             }
           }
 
@@ -350,6 +379,8 @@ function App() {
     storage.removeItem('token');
     storage.removeItem('userId');
     setIsAuthenticated(false);
+    setActiveScreen('timelogger');
+    setCanApprove(false);
   };
 
   return (
@@ -361,6 +392,28 @@ function App() {
       ) : isAuthenticated ? (
         <>
           <div className="app-toolbar">
+            {canApprove && (
+              <button
+                type="button"
+                className="approval-toggle-button"
+                onClick={() => setActiveScreen(activeScreen === 'approval' ? 'timelogger' : 'approval')}
+                aria-label={activeScreen === 'approval' ? 'Вернуться к таймшиту' : 'Апрув часов'}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  {activeScreen === 'approval' ? (
+                    <>
+                      <circle cx="12" cy="12" r="10" />
+                      <polyline points="12,8 12,12 16,14" />
+                    </>
+                  ) : (
+                    <>
+                      <path d="M9 11l3 3L22 4" />
+                      <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+                    </>
+                  )}
+                </svg>
+              </button>
+            )}
             <button type="button" className="logout-button" onClick={handleLogout} aria-label="Выйти">
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
@@ -369,7 +422,11 @@ function App() {
               </svg>
             </button>
           </div>
-          <TimeLogger />
+          {activeScreen === 'approval' ? (
+            <ApprovalScreen onBack={() => setActiveScreen('timelogger')} />
+          ) : (
+            <TimeLogger />
+          )}
         </>
       ) : (
         <LoginForm onLoginSuccess={handleLoginSuccess} />
