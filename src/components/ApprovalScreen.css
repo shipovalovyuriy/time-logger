@@ -214,37 +214,45 @@
 }
 
 .approval-project__bulk {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 8px;
-  flex-wrap: wrap;
 }
 
 .approval-bulk-btn {
-  border: 1px solid var(--approval-soft-strong);
-  background: transparent;
-  color: var(--tg-text-color, #fff);
-  border-radius: 10px;
-  padding: 7px 12px;
-  font-size: 12px;
+  border: 1px solid transparent;
+  color: #ffffff;
+  border-radius: 12px;
+  min-height: 42px;
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 13px;
   font-weight: 800;
+  line-height: 1.2;
+  text-align: center;
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.15);
   cursor: pointer;
-  transition: transform 120ms ease, opacity 120ms ease;
+  transition: transform 120ms ease, opacity 120ms ease, filter 120ms ease;
   -webkit-tap-highlight-color: transparent;
 }
 
 .approval-bulk-btn:disabled {
-  opacity: 0.45;
-  cursor: default;
+  opacity: 0.62;
+  filter: saturate(0.55) grayscale(0.12);
+  cursor: not-allowed;
+  box-shadow: none;
 }
 
 .approval-bulk-btn--approve {
-  border-color: rgba(106, 228, 151, 0.55);
-  color: #b0f6d3;
+  border-color: #15803d;
+  background: linear-gradient(180deg, #22c55e, #16a34a);
+  color: #ffffff;
 }
 
 .approval-bulk-btn--reject {
-  border-color: rgba(255, 107, 107, 0.55);
-  color: #ffc3c3;
+  border-color: #b91c1c;
+  background: linear-gradient(180deg, #ef4444, #dc2626);
+  color: #ffffff;
 }
 
 .approval-member {
@@ -589,8 +597,12 @@ html[data-tg-color-scheme='light'] .approval-status--rejected {
 
 html[data-tg-color-scheme='light'] .approval-bulk-btn--approve,
 html[data-tg-color-scheme='light'] .approval-action-btn--approve {
-  border-color: rgba(21, 128, 61, 0.9);
+  border-color: #15803d;
   color: #ffffff;
+}
+
+html[data-tg-color-scheme='light'] .approval-bulk-btn--approve {
+  background: linear-gradient(180deg, #22c55e, #16a34a);
 }
 
 html[data-tg-color-scheme='light'] .approval-action-btn--approve {
@@ -599,8 +611,12 @@ html[data-tg-color-scheme='light'] .approval-action-btn--approve {
 
 html[data-tg-color-scheme='light'] .approval-bulk-btn--reject,
 html[data-tg-color-scheme='light'] .approval-action-btn--reject {
-  border-color: rgba(185, 28, 28, 0.9);
+  border-color: #b91c1c;
   color: #ffffff;
+}
+
+html[data-tg-color-scheme='light'] .approval-bulk-btn--reject {
+  background: linear-gradient(180deg, #ef4444, #dc2626);
 }
 
 html[data-tg-color-scheme='light'] .approval-action-btn--reject {
