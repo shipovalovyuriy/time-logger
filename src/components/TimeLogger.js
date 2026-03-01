@@ -244,7 +244,13 @@ const TimeLogger = () => {
   );
 
   const carryoverPendingSegments = useMemo(
-    () => carryoverMonthSegments.filter((seg) => { const sk = getSegmentKey(seg.weekStart, seg.weekEnd); return !isSegmentSummaryComplete(carryoverSummaryByKey[sk]); }),
+    () =>
+      carryoverMonthSegments.filter((seg) => {
+        const sk = getSegmentKey(seg.weekStart, seg.weekEnd);
+        const summary = carryoverSummaryByKey[sk];
+        if (summary?.isLocked) return false;
+        return !isSegmentSummaryComplete(summary);
+      }),
     [carryoverMonthSegments, carryoverSummaryByKey]
   );
   const carryoverPendingSegmentsCount = carryoverPendingSegments.length;
@@ -468,7 +474,14 @@ const TimeLogger = () => {
           })
         );
         const nextSegDataByKey = {}; const nextSummByKey = {};
-        segmentPayloads.forEach((item) => { nextSegDataByKey[item.segmentKey] = item.entry; nextSummByKey[item.segmentKey] = { projectTotal: item.entry.projectTotal, activityTotal: item.entry.activityTotal }; });
+        segmentPayloads.forEach((item) => {
+          nextSegDataByKey[item.segmentKey] = item.entry;
+          nextSummByKey[item.segmentKey] = {
+            projectTotal: item.entry.projectTotal,
+            activityTotal: item.entry.activityTotal,
+            isLocked: Boolean(item.entry.isLocked)
+          };
+        });
         return { projects: monthProjects, segmentDataByKey: nextSegDataByKey, summaryByKey: nextSummByKey };
       };
 
@@ -646,8 +659,16 @@ const TimeLogger = () => {
       }
 
       setSegmentDataByKey((prev) => ({ ...prev, [weekKey]: { projectPercents: { ...projectPercentById }, activityPercents: { ...activityPercentByCode }, projectTotal: projectTotalPercent, activityTotal: activityTotalPercent, isLocked: false } }));
-      setSegmentSummaryByKey((prev) => ({ ...prev, [weekKey]: { projectTotal: projectTotalPercent, activityTotal: activityTotalPercent } }));
-      if (isViewingCarryoverMonth) setCarryoverSummaryByKey((prev) => ({ ...prev, [weekKey]: { projectTotal: projectTotalPercent, activityTotal: activityTotalPercent } }));
+      setSegmentSummaryByKey((prev) => ({
+        ...prev,
+        [weekKey]: { projectTotal: projectTotalPercent, activityTotal: activityTotalPercent, isLocked: false }
+      }));
+      if (isViewingCarryoverMonth) {
+        setCarryoverSummaryByKey((prev) => ({
+          ...prev,
+          [weekKey]: { projectTotal: projectTotalPercent, activityTotal: activityTotalPercent, isLocked: false }
+        }));
+      }
       setInitialProjectPercentById({ ...projectPercentById }); setInitialActivityPercentByCode({ ...activityPercentByCode }); setIsSubmitted(true);
       if (window.Telegram?.WebApp) { if (closeAfterSubmitTimerRef.current) window.clearTimeout(closeAfterSubmitTimerRef.current); closeAfterSubmitTimerRef.current = window.setTimeout(() => { window.Telegram?.WebApp?.close?.(); closeAfterSubmitTimerRef.current = null; }, 420); }
     } catch (e) { setError(e.message || 'Ошибка сохранения'); setIsSubmitted(false); } finally { setIsSaving(false); }

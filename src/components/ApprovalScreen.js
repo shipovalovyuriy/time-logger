@@ -436,16 +436,16 @@ const ApprovalScreen = ({ onBack }) => {
 
                               <div className="approval-member__quick">
                                 <span className="approval-quick-chip">
-                                  <b>Ф:</b> {formatHours(workHours)}
+                                  <b>План:</b> {formatHours(plannedHours)} ч
                                 </span>
                                 <span className="approval-quick-chip">
-                                  <b>С:</b> {formatHours(overHours)}
+                                  <b>Факт:</b> {formatHours(workHours)} ч
                                 </span>
                                 <span className="approval-quick-chip">
-                                  <b>П:</b> {formatHours(plannedHours)}
+                                  <b>Overtime:</b> {formatHours(overHours)} ч
                                 </span>
                                 <span className="approval-quick-chip">
-                                  <b>У:</b> {Number.isFinite(utilization) ? `${formatHours(utilization)}%` : '—'}
+                                  <b>Утилизация:</b> {Number.isFinite(utilization) ? `${formatHours(utilization)}%` : '—'}
                                 </span>
                               </div>
 
