@@ -174,16 +174,27 @@
   background: rgba(255, 255, 255, 0.07);
 }
 
+.approval-project__counter--total {
+  color: var(--tg-text-color, #fff);
+  background: rgba(255, 255, 255, 0.12);
+}
+
 .approval-project__counter--pending {
   color: #ffd580;
+  border-color: rgba(255, 198, 109, 0.35);
+  background: rgba(150, 110, 34, 0.18);
 }
 
 .approval-project__counter--approved {
   color: #a4f0ca;
+  border-color: rgba(106, 228, 151, 0.35);
+  background: rgba(39, 125, 90, 0.18);
 }
 
 .approval-project__counter--rejected {
   color: #ffb3b3;
+  border-color: rgba(255, 107, 107, 0.35);
+  background: rgba(146, 43, 43, 0.18);
 }
 
 .approval-project__toggle {
@@ -446,6 +457,48 @@
   cursor: pointer;
 }
 
+.approval-saving-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+
+.approval-saving-overlay__content {
+  background: var(--approval-card-bg);
+  border: 1px solid var(--approval-card-border);
+  border-radius: 14px;
+  padding: 16px 24px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--tg-text-color, #fff);
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.3);
+}
+
+.approval-saving-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--approval-soft-strong);
+  border-top-color: var(--tg-button-color, #2ea6ff);
+  border-radius: 50%;
+  animation: approval-spin 0.7s linear infinite;
+}
+
+@keyframes approval-spin {
+  to { transform: rotate(360deg); }
+}
+
 @media (hover: hover) and (pointer: fine) {
   .approval-screen__back:hover,
   .approval-month-nav__btn:hover,
@@ -495,6 +548,29 @@ html[data-tg-color-scheme='light'] .approval-bulk-btn--reject,
 html[data-tg-color-scheme='light'] .approval-action-btn--reject {
   border-color: rgba(220, 38, 38, 0.35);
   background: rgba(254, 202, 202, 0.34);
+  color: #7f1d1d;
+}
+
+html[data-tg-color-scheme='light'] .approval-project__counter--total {
+  background: rgba(15, 23, 42, 0.08);
+  color: var(--tg-text-color, #0f172a);
+}
+
+html[data-tg-color-scheme='light'] .approval-project__counter--pending {
+  border-color: rgba(202, 138, 4, 0.3);
+  background: rgba(250, 204, 21, 0.16);
+  color: #92400e;
+}
+
+html[data-tg-color-scheme='light'] .approval-project__counter--approved {
+  border-color: rgba(22, 163, 74, 0.3);
+  background: rgba(134, 239, 172, 0.18);
+  color: #14532d;
+}
+
+html[data-tg-color-scheme='light'] .approval-project__counter--rejected {
+  border-color: rgba(220, 38, 38, 0.3);
+  background: rgba(254, 202, 202, 0.28);
   color: #7f1d1d;
 }
 

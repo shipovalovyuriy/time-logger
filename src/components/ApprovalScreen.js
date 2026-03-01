@@ -111,12 +111,6 @@ const ApprovalScreen = ({ onBack }) => {
       const token = await ensureAuthToken();
       const data = await fetchApprovalQuick(token, year, month);
       setProjects(data);
-      setExpandedProjects((prev) => {
-        if (prev.size === 0 && data.length > 0) {
-          return new Set([data[0]?.project_id]);
-        }
-        return prev;
-      });
     } catch (err) {
       setError(err.message || 'Не удалось загрузить данные.');
       setProjects([]);
@@ -196,6 +190,15 @@ const ApprovalScreen = ({ onBack }) => {
 
   return (
     <div className="approval-screen">
+      {isSaving && (
+        <div className="approval-saving-overlay">
+          <div className="approval-saving-overlay__content">
+            <div className="approval-saving-spinner" />
+            <span>Сохраняем...</span>
+          </div>
+        </div>
+      )}
+
       <div className="approval-screen__header">
         <span className="approval-screen__title">Апрув часов</span>
         <button type="button" className="approval-screen__back" onClick={onBack}>
@@ -248,9 +251,9 @@ const ApprovalScreen = ({ onBack }) => {
               const projectId = Number(project.project_id);
               const isOpen = expandedProjects.has(projectId);
               const members = Array.isArray(project.members) ? project.members : [];
-              const pendingCount = Number(project.pendingCount ?? 0);
-              const approvedCount = Number(project.approvedCount ?? 0);
-              const rejectedCount = Number(project.rejectedCount ?? 0);
+              const pendingCount = Number(project.pendingCount ?? 0) || members.filter((m) => Number(m.confirm_status || 0) === 0).length;
+              const approvedCount = Number(project.approvedCount ?? 0) || members.filter((m) => Number(m.confirm_status || 0) === 1).length;
+              const rejectedCount = Number(project.rejectedCount ?? 0) || members.filter((m) => Number(m.confirm_status || 0) === -1).length;
               const managerName = toCleanString(project.manager_name);
               const directionName = toCleanString(project.direction);
 
@@ -278,15 +281,24 @@ const ApprovalScreen = ({ onBack }) => {
                       </div>
                     </div>
                     <div className="approval-project__summary">
-                      <span className="approval-project__counter approval-project__counter--pending">
-                        Ожидают: {pendingCount}
+                      <span className="approval-project__counter approval-project__counter--total">
+                        {members.length}
                       </span>
-                      <span className="approval-project__counter approval-project__counter--approved">
-                        Ок: {approvedCount}
-                      </span>
-                      <span className="approval-project__counter approval-project__counter--rejected">
-                        Нет: {rejectedCount}
-                      </span>
+                      {pendingCount > 0 && (
+                        <span className="approval-project__counter approval-project__counter--pending">
+                          {pendingCount}
+                        </span>
+                      )}
+                      {approvedCount > 0 && (
+                        <span className="approval-project__counter approval-project__counter--approved">
+                          {approvedCount}
+                        </span>
+                      )}
+                      {rejectedCount > 0 && (
+                        <span className="approval-project__counter approval-project__counter--rejected">
+                          {rejectedCount}
+                        </span>
+                      )}
                       <span className={`approval-project__toggle ${isOpen ? 'open' : ''}`}>
                         ▼
                       </span>
@@ -317,8 +329,8 @@ const ApprovalScreen = ({ onBack }) => {
                       {members.length === 0 ? (
                         <div className="approval-empty">Нет сотрудников.</div>
                       ) : (
-                        members.map((member) => {
-                          const mid = Number(member.member_id);
+                        members.map((member, memberIndex) => {
+                          const mid = Number(member.member_id) || memberIndex;
                           const cStatus = Number(member.confirm_status || 0);
                           const sClass = statusClass(cStatus);
                           const memberName = getMemberName(member);
@@ -327,7 +339,7 @@ const ApprovalScreen = ({ onBack }) => {
                           const memberInitials = getInitials(memberName);
 
                           return (
-                            <div key={mid} className="approval-member">
+                            <div key={`${projectId}-${mid}-${memberIndex}`} className="approval-member">
                               <div className="approval-member__top">
                                 <div className="approval-member__identity">
                                   <div className="approval-member__avatar" aria-hidden="true">
