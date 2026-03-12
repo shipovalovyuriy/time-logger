@@ -40,12 +40,25 @@ const createAuthExpiredError = (statusCode) => {
   return error;
 };
 
+let sessionPayloadCache = {
+  token: '',
+  userId: null,
+  sessionVersion: null,
+  payload: null
+};
+
 export const requestJson = async (url, options, fallbackMessage) => {
   const response = await fetch(url, options);
   const payload = await response.json().catch(() => null);
 
   if (response.status === 401 || response.status === 403) {
     storage.removeItem('token');
+    sessionPayloadCache = {
+      token: '',
+      userId: null,
+      sessionVersion: null,
+      payload: null
+    };
     throw createAuthExpiredError(response.status);
   }
 
@@ -64,19 +77,7 @@ export const getTelegramUserId = () => {
   return Number.isFinite(userId) && userId > 0 ? userId : null;
 };
 
-export const fetchSessionMemberId = async (authToken) => {
-  const payload = await requestJson(
-    `${API_BASE}/auth-service/api/v1/check`,
-    {
-      method: 'GET',
-      headers: {
-        Authorization: authToken,
-        'Content-Type': 'application/json'
-      }
-    },
-    'Не удалось получить данные текущей сессии'
-  );
-
+const extractSessionUserId = (payload) => {
   const result = extractResult(payload);
   const candidates = [
     payload?.id,
@@ -95,6 +96,124 @@ export const fetchSessionMemberId = async (authToken) => {
   }
 
   return null;
+};
+
+const extractSessionVersion = (payload) => {
+  const result = extractResult(payload);
+  const candidates = [
+    payload?.session_version,
+    result?.session_version,
+    payload?.access?.session_version,
+    result?.access?.session_version
+  ];
+
+  for (let index = 0; index < candidates.length; index += 1) {
+    const parsed = toPositiveInt(candidates[index]);
+    if (parsed) {
+      return parsed;
+    }
+  }
+
+  return null;
+};
+
+const readCachedSessionPayload = (authToken) => {
+  const token = normalizeBearerToken(authToken);
+  if (!token || token !== sessionPayloadCache.token) {
+    return null;
+  }
+  if (!sessionPayloadCache.payload || !sessionPayloadCache.userId || !sessionPayloadCache.sessionVersion) {
+    return null;
+  }
+  return {
+    token,
+    payload: sessionPayloadCache.payload,
+    userId: sessionPayloadCache.userId,
+    sessionVersion: sessionPayloadCache.sessionVersion
+  };
+};
+
+const writeCachedSessionPayload = (authToken, payload) => {
+  const token = normalizeBearerToken(authToken);
+  const userId = extractSessionUserId(payload);
+  const sessionVersion = extractSessionVersion(payload);
+
+  sessionPayloadCache = {
+    token,
+    userId,
+    sessionVersion,
+    payload
+  };
+};
+
+const fetchSessionVersionStatus = async (authToken) => {
+  const token = normalizeBearerToken(authToken);
+  return requestJson(
+    `${API_BASE}/auth-service/api/v1/check/version`,
+    {
+      method: 'GET',
+      headers: {
+        Authorization: token,
+        'Content-Type': 'application/json'
+      }
+    },
+    'Не удалось проверить актуальность сессии'
+  );
+};
+
+export const clearSessionPayloadCache = () => {
+  sessionPayloadCache = {
+    token: '',
+    userId: null,
+    sessionVersion: null,
+    payload: null
+  };
+};
+
+export const fetchSessionPayload = async (authToken, options = {}) => {
+  const token = normalizeBearerToken(authToken);
+  const forceFull = Boolean(options?.forceFull);
+
+  if (!token) {
+    throw new Error('Не удалось получить данные текущей сессии');
+  }
+
+  const cached = !forceFull ? readCachedSessionPayload(token) : null;
+  if (cached) {
+    try {
+      const versionPayload = await fetchSessionVersionStatus(token);
+      const currentUserId = extractSessionUserId(versionPayload);
+      const currentVersion = extractSessionVersion(versionPayload);
+
+      if (currentUserId === cached.userId && currentVersion === cached.sessionVersion) {
+        return cached.payload;
+      }
+    } catch (error) {
+      if (error?.isAuthError) {
+        throw error;
+      }
+    }
+  }
+
+  const payload = await requestJson(
+    `${API_BASE}/auth-service/api/v1/check`,
+    {
+      method: 'GET',
+      headers: {
+        Authorization: token,
+        'Content-Type': 'application/json'
+      }
+    },
+    'Не удалось получить данные текущей сессии'
+  );
+
+  writeCachedSessionPayload(token, payload);
+  return payload;
+};
+
+export const fetchSessionMemberId = async (authToken) => {
+  const payload = await fetchSessionPayload(authToken);
+  return extractSessionUserId(payload);
 };
 
 export const extractTimesheetMode = (payload) => {
@@ -117,34 +236,12 @@ export const extractTimesheetMode = (payload) => {
 };
 
 export const fetchSessionTimesheetMode = async (authToken) => {
-  const payload = await requestJson(
-    `${API_BASE}/auth-service/api/v1/check`,
-    {
-      method: 'GET',
-      headers: {
-        Authorization: authToken,
-        'Content-Type': 'application/json'
-      }
-    },
-    'Не удалось получить данные текущей сессии'
-  );
-
+  const payload = await fetchSessionPayload(authToken);
   return extractTimesheetMode(payload);
 };
 
 export const fetchSessionRoles = async (authToken) => {
-  const payload = await requestJson(
-    `${API_BASE}/auth-service/api/v1/check`,
-    {
-      method: 'GET',
-      headers: {
-        Authorization: authToken,
-        'Content-Type': 'application/json'
-      }
-    },
-    'Не удалось получить данные текущей сессии'
-  );
-
+  const payload = await fetchSessionPayload(authToken);
   const result = extractResult(payload);
   const roles = result?.roles || payload?.roles || [];
   return Array.isArray(roles) ? roles : [];

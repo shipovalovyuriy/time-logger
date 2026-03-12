@@ -4,6 +4,7 @@ import TimeLogger from './components/TimeLogger';
 import LoginForm from './components/LoginForm';
 import ApprovalScreen from './components/ApprovalScreen';
 import storage from './utils/storage';
+import { clearSessionPayloadCache, fetchSessionPayload } from './utils/api';
 
 const API_BASE = 'https://test.newpulse.pkz.icdc.io';
 
@@ -23,22 +24,6 @@ const toPositiveInt = (value) => {
   }
   return Math.trunc(parsed);
 };
-
-const APPROVAL_ROLE_IDS = new Set([2, 3, 4]);
-const APPROVAL_ROLE_NAMES = new Set([
-  'admin',
-  'pm',
-  'project_manager',
-  'project manager',
-  'админ',
-  'менеджер проекта',
-  'руководитель направления',
-  'рн',
-  'head_of_direction',
-  'head of direction'
-]);
-
-const normalizeRoleName = (value) => String(value || '').trim().toLowerCase();
 
 const extractMemberId = (payload) => {
   const result =
@@ -69,54 +54,16 @@ const extractMemberId = (payload) => {
   return null;
 };
 
-const extractRoleCandidates = (payload) => {
-  const result =
-    payload && typeof payload === 'object' && !Array.isArray(payload) && 'result' in payload
-      ? payload.result
-      : payload;
-
-  const candidates = [];
-  const roleArrays = [result?.roles, payload?.roles];
-
-  roleArrays.forEach((value) => {
-    if (Array.isArray(value)) {
-      candidates.push(...value);
-    }
-  });
-
-  if (result?.role) candidates.push(result.role);
-  if (payload?.role) candidates.push(payload.role);
-
-  const roleIdCandidates = [result?.role_id, payload?.role_id, result?._role, payload?._role];
-  roleIdCandidates.forEach((value) => {
-    const roleId = toPositiveInt(value);
-    if (roleId) candidates.push(roleId);
-  });
-
-  return candidates;
-};
-
 const hasApprovalAccess = (payload) => {
-  const roles = extractRoleCandidates(payload);
-  if (!roles.length) return false;
+  const capabilities =
+    payload?.access?.capabilities && typeof payload.access.capabilities === 'object'
+      ? payload.access.capabilities
+      : null;
+  if (!capabilities || Object.keys(capabilities).length === 0) {
+    return false;
+  }
 
-  return roles.some((role) => {
-    const roleId =
-      typeof role === 'number'
-        ? toPositiveInt(role)
-        : toPositiveInt(role?.id) || toPositiveInt(role?.role_id) || toPositiveInt(role?._role);
-
-    if (roleId && APPROVAL_ROLE_IDS.has(roleId)) {
-      return true;
-    }
-
-    const roleName =
-      typeof role === 'string'
-        ? role
-        : role?.name || role?.code || role?.role || role?.title || '';
-
-    return APPROVAL_ROLE_NAMES.has(normalizeRoleName(roleName));
-  });
+  return Boolean(capabilities['feature.approval_quick']);
 };
 
 const fetchSessionAccess = async (authToken) => {
@@ -126,19 +73,7 @@ const fetchSessionAccess = async (authToken) => {
   }
 
   try {
-    const response = await fetch(`${API_BASE}/auth-service/api/v1/check`, {
-      method: 'GET',
-      headers: {
-        Authorization: token,
-        'Content-Type': 'application/json'
-      }
-    });
-
-    if (!response.ok) {
-      return null;
-    }
-
-    const payload = await response.json().catch(() => null);
+    const payload = await fetchSessionPayload(token);
     return {
       token,
       memberId: extractMemberId(payload),
@@ -434,6 +369,7 @@ function App() {
   };
 
   const handleLogout = () => {
+    clearSessionPayloadCache();
     storage.removeItem('token');
     storage.removeItem('userId');
     setIsAuthenticated(false);

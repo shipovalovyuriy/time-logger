@@ -128,6 +128,21 @@ const ApprovalScreen = ({ onBack }) => {
   const monthDate = useMemo(() => new Date(year, month - 1, 1), [year, month]);
   const monthLabel = useMemo(() => toMonthLabel(monthDate), [monthDate]);
 
+  const applyVerticalSwipeState = useCallback((allowSwipe) => {
+    if (!telegramWebApp) return;
+    if (allowSwipe) {
+      telegramWebApp.enableVerticalSwipes?.();
+    } else {
+      telegramWebApp.disableVerticalSwipes?.();
+    }
+
+    try {
+      telegramWebApp.setSwipeBehavior?.({ allow_vertical_swipe: allowSwipe });
+    } catch {
+      // Older Telegram clients may not support setSwipeBehavior.
+    }
+  }, [telegramWebApp]);
+
   const getAuthToken = useCallback(() => {
     return normalizeBearerToken(storage.getItem('token'));
   }, []);
@@ -160,11 +175,11 @@ const ApprovalScreen = ({ onBack }) => {
   useEffect(() => {
     if (!telegramWebApp) return undefined;
     telegramWebApp.expand?.();
-    telegramWebApp.disableVerticalSwipes?.();
+    applyVerticalSwipeState(false);
     return () => {
-      telegramWebApp.enableVerticalSwipes?.();
+      applyVerticalSwipeState(true);
     };
-  }, [telegramWebApp]);
+  }, [applyVerticalSwipeState, telegramWebApp]);
 
   useEffect(() => {
     if (!telegramWebApp) return undefined;
@@ -177,6 +192,7 @@ const ApprovalScreen = ({ onBack }) => {
       ticking = true;
       window.requestAnimationFrame(() => {
         telegramWebApp.expand?.();
+        applyVerticalSwipeState(false);
         ticking = false;
       });
     };
@@ -185,7 +201,7 @@ const ApprovalScreen = ({ onBack }) => {
     return () => {
       listElement.removeEventListener('scroll', keepExpanded);
     };
-  }, [telegramWebApp, projects.length]);
+  }, [applyVerticalSwipeState, telegramWebApp, projects.length]);
 
   const changeMonth = (delta) => {
     let newMonth = month + delta;
